@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { managedTransport, retryDelay } from '../src/agent/transport';
 import { RequestScheduler } from '../src/main/request-scheduler';
+import { APP_LOCALES, translate } from '../src/shared/i18n';
 
 afterEach(() => vi.useRealTimers());
 function harness(mockFetch: typeof fetch, extra: Record<string, unknown> = {}) {
@@ -9,6 +10,17 @@ function harness(mockFetch: typeof fetch, extra: Record<string, unknown> = {}) {
   return { ...transport, controller, release, progress, telemetry, failure };
 }
 describe('bounded HTTP recovery', () => {
+  it.each(APP_LOCALES)('localizes composed %s failures while preserving raw provider diagnostics', async locale => {
+    const detail = '原始 provider detail {untouched}';
+    const h = harness(async () => new Response(JSON.stringify({ request_id: 'request-unchanged', error: { code: 'original-code', message: detail } }), { status: 401 }), { locale });
+    const error = await h.fetch('https://fixture.invalid').catch(value => value as unknown);
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) throw new Error('Expected localized transport failure');
+    expect(error.message).toContain(translate(locale, '供应商鉴权或权限检查失败。'));
+    expect(error.message).toContain(translate(locale, '已完成的文件修改仍保留。'));
+    expect(error.message).toContain('HTTP 401 · original-code · request ID: request-unchanged');
+    expect(error.message).toContain(detail);
+  });
   it('honors retry headers and rejects invalid hints', () => {
     expect(retryDelay(new Headers({ 'retry-after-ms': '250', 'retry-after': '7' }), 0)).toBe(250);
     expect(retryDelay(new Headers({ 'retry-after': '2' }), 0)).toBe(2000);

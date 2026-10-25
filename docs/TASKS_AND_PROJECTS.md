@@ -1,6 +1,6 @@
 # Tasks, projects and conversation controls
 
-LocalCode 0.1.18 separates a conversation from its optional project folder.
+LocalCode 0.1.19 separates a conversation from its optional project folder.
 
 - Start a task without choosing a folder. The first send creates its saved history; returning home or clicking New Task does not add empty records.
 - Use the project picker above the composer to search existing projects, add a folder or choose to work outside a project. The unsent task draft stays in place when the selection changes. A late folder-picker result cannot override a newer task selection.

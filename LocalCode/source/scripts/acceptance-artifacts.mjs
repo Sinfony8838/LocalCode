@@ -75,6 +75,7 @@ async function launch() {
   page.on('response', response => { if (response.url().startsWith('localcode-preview:')) diagnostics.previewResponses.push({ url: response.url(), status: response.status(), headers: response.headers() }); });
   page.on('framenavigated', frame => diagnostics.frameNavigations.push({ url: frame.url(), name: frame.name() }));
   await page.getByLabel('任务输入').waitFor();
+  await page.bringToFront();
 }
 const state = id => page.evaluate(id => window.localcode.openSession(id), id);
 const terminal = (id, wanted = 'completed') => poll(async () => { const s = await state(id); if (['completed', 'failed', 'interrupted'].includes(s.status)) { assert.equal(s.status, wanted, s.error); return s; } }, `${id}: ${wanted}`);
@@ -94,7 +95,8 @@ try {
   await launch();
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, project);
   await page.getByRole('button', { name: '打开项目文件夹', exact: true }).first().click();
-  projectId = (await page.evaluate(() => window.localcode.bootstrap())).projects[0].id;
+  // Clicking returns before the asynchronous native picker and index write finish.
+  projectId = await poll(async () => (await page.evaluate(() => window.localcode.bootstrap())).projects[0]?.id, 'project selection persisted');
   await page.evaluate(url => window.localcode.saveProvider({ id: 'artifacts-fixture', name: 'Artifacts fixture', kind: 'openai', baseUrl: url, model: 'fixture', contextWindow: 16384, maxTokens: 1024, apiKey: 'artifacts-fixture-secret-not-real' }), baseUrl);
 
   const afterFirst = gate(), finalGate = gate();
@@ -297,6 +299,7 @@ try {
   await page.getByRole('menu').waitFor();
   const menuFits = await page.getByRole('menu').evaluate(element => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.top >= 0 && box.right <= innerWidth + 1 && box.bottom <= innerHeight + 1; });
   assert(menuFits, 'Artifact context menu must fit viewport at 20px');
+  await page.bringToFront();
   await page.screenshot({ path: path.join(root, '05-dark-20px-history.png') });
   await page.keyboard.press('Escape'); await page.getByRole('menu').waitFor({ state: 'detached' }); assert.equal(await page.getByRole('menu').count(), 0);
   await app.close(); app = undefined; await launch(); await select(id);

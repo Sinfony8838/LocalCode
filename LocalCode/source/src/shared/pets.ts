@@ -1,3 +1,4 @@
+import type { AppLocale } from './i18n';
 export type PetId = 'paimon' | 'ronova';
 export type PetAnimation = 'idle' | 'running-right' | 'running-left' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review';
 export interface PetPreferences {
@@ -11,6 +12,7 @@ export interface PetPreferences {
 }
 export interface PetCharacter { id: PetId; name: string; available: boolean; version: string; source: 'bundled' | 'imported' | 'missing' }
 export interface PetSnapshot {
+  locale?: AppLocale;
   preferences: PetPreferences;
   characters: PetCharacter[];
   animation: PetAnimation;

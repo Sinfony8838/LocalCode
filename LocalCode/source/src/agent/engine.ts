@@ -7,6 +7,7 @@ import { InMemoryCredentialStore, normalizeContext } from '@earendil-works/pi-ai
 import { createAgentSession, createExtensionRuntime, ModelRuntime, SessionManager, SettingsManager,
   type AgentSessionEvent, type ResourceLoader, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentEvent, Approval, RunRequest, WorkerCommand, RunProgress } from '../shared/contracts.js';
+import { DEFAULT_LOCALE, isAppLocale, translate, type AppLocale } from '../shared/i18n.js';
 import { killActiveCommands } from '../core/command.js';
 import { createWorkspaceTools } from './tools.js';
 import { managedTransport, type RequestLease } from './transport.js';
@@ -69,27 +70,37 @@ const MAX_TOOL_CALLS = 12;
 // pi may compact a history and a split-turn prefix with separate requests.
 const MAX_FINAL_COMPACTION_REQUESTS = 2;
 const BUDGET_EXHAUSTED = '本轮 12 次工具调用预算已耗尽，未继续执行工具。已收到的回复和文件修改已保留；请根据实际验证结果判断完成情况，需要继续时请发送新消息。';
-const FINAL_SUMMARY_PROMPT = '本轮工具调用预算已耗尽。现在只能输出最后一条简短中文总结，禁止再调用任何工具。仅根据已有结果说明已做的工作、实际验证结果，以及未完成或未验证的事项；不要把预算耗尽说成任务已通过验收。';
+const FINAL_SUMMARY_PROMPT = '本轮工具调用预算已耗尽。现在只能输出最后一条简短总结，禁止再调用任何工具。仅根据已有结果说明已做的工作、实际验证结果，以及未完成或未验证的事项；不要把预算耗尽说成任务已通过验收。';
 
-const SYSTEM_PROMPT = `你是 LocalCode，本机中文编程助手。只使用提供的工具完成用户任务。
+const SYSTEM_PROMPT = `你是 LocalCode，本机编程助手。只使用提供的工具完成用户任务。
 先浏览和分页读取相关文件，再做最小必要修改。不要臆测文件内容。文件路径相对当前项目。
 命令由用户逐次审批；拒绝后不要绕过审批。命令以当前用户权限执行，没有系统沙箱。
 工具参数必须严格匹配声明。参数错误只有一次纠正机会。每轮最多12次工具调用；接近上限时收尾。
 工具输出若标注截断，可缩小范围再次读取；界面保留完整日志。
 阶段性回复只说明当前发现和下一步，不要在每次工具调用或模型消息结束时宣称整轮完成。
-只有本轮用户任务实际结束、不再调用工具时，给出一次简洁的中文最终总结：先说完成了什么，再说明实际验证结果、生成或修改的文件；若仍有失败、未验证或未完成事项，明确写出。不要虚构检查通过、文件数量或完成状态。
+只有本轮用户任务实际结束、不再调用工具时，给出一次简洁的最终总结：先说完成了什么，再说明实际验证结果、生成或修改的文件；若仍有失败、未验证或未完成事项，明确写出。不要虚构检查通过、文件数量或完成状态。
 文件链接使用项目相对路径，便于在应用内查看。修改数量和耗时由应用在整轮结束后统计，无需反复列举。`;
-const CHAT_SYSTEM_PROMPT = `你是 LocalCode，用中文帮助用户讨论问题、解释代码和规划任务。
+const CHAT_SYSTEM_PROMPT = `你是 LocalCode，帮助用户讨论问题、解释代码和规划任务。
 当前任务不在项目中工作，未指定工作区，也没有文件或终端工具。直接根据对话回答，不要求用户先创建文件夹。不要声称已读取、修改或运行本机文件；需要处理项目文件时提示用户选择项目或将此任务移入项目。
 中间说明保持简短，任务结束后给出一次清晰的最终回答，不虚构操作或验证结果。`;
 
+const REPLY_LANGUAGE: Record<AppLocale, string> = { 'zh-CN': 'Simplified Chinese (简体中文)', en: 'English', ja: 'Japanese (日本語)', ko: 'Korean (한국어)' };
+/** Recomputed for every run, including a resumed transcript after changing settings. */
+export function responseLanguagePolicy(locale?: AppLocale): string {
+  const selected = isAppLocale(locale) ? locale : DEFAULT_LOCALE;
+  return `Response language: ${REPLY_LANGUAGE[selected]}. Use this language by default for every user-visible reply, including progress updates, explanations, questions, and the final summary. The current user may explicitly request a different response language, a translation, or particular languages for an output or artifact; follow that explicit request for its stated scope. The language of the user's input alone does not override this setting. The current setting supersedes the default language of previous conversation turns; preserve the original language of quoted text, code, paths, identifiers, and tool output.`;
+}
+
+export function agentSystemPrompt(locale?: AppLocale, systemPrompt = SYSTEM_PROMPT): string { return `${systemPrompt}\n\n${responseLanguagePolicy(locale)}`; }
+export function finalSummaryPrompt(locale?: AppLocale): string { return `${FINAL_SUMMARY_PROMPT}\n\n${responseLanguagePolicy(locale)}`; }
+
 /** Never discovers resources from the project, home directory, or pi's global configuration. */
-export function isolatedResourceLoader(systemPrompt = SYSTEM_PROMPT): ResourceLoader {
+export function isolatedResourceLoader(locale?: AppLocale, systemPrompt = SYSTEM_PROMPT): ResourceLoader {
   return {
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
     getSkills: () => ({ skills: [], diagnostics: [] }), getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => systemPrompt, getSystemPromptSource: () => undefined,
+    getSystemPrompt: () => agentSystemPrompt(locale, systemPrompt), getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [],
     extendResources: () => {}, reload: async () => {},
   };
@@ -144,7 +155,7 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null,
     allowModelNetwork: false, refreshOnCreate: false, signal });
   let transportError: string | undefined;
-  const transport = !local ? managedTransport({ signal,
+  const transport = !local ? managedTransport({ signal, locale: request.locale,
     acquire: context.acquireRequest ?? (async () => ({ release() {} })),
     progress: progress => context.emit({ type: 'progress', runId: request.runId, sessionId: request.sessionId, progress }),
     telemetry: (type, fields) => context.telemetry?.(type, fields),
@@ -192,7 +203,7 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   }
   const { session } = await createAgentSession({
     cwd, agentDir: path.join(request.dataDir, 'pi'), modelRuntime: runtime, model,
-    thinkingLevel: 'off', sessionManager, settingsManager, resourceLoader: isolatedResourceLoader(request.projectPath ? SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT),
+    thinkingLevel: 'off', sessionManager, settingsManager, resourceLoader: isolatedResourceLoader(request.locale, request.projectPath ? SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT),
     noTools: 'builtin', tools: customTools.map(tool => tool.name), customTools,
   });
   session.agent.toolExecution = 'sequential';
@@ -212,7 +223,7 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
       return rest;
     });
     return stream(model, normalizeContext({ messages: [...messages,
-      { role: 'system', content: FINAL_SUMMARY_PROMPT, timestamp: Date.now() }], tools: [] }), options);
+      { role: 'system', content: finalSummaryPrompt(request.locale), timestamp: Date.now() }], tools: [] }), options);
   };
   if (transport) { const dispose = session.dispose.bind(session); session.dispose = () => { transport.close(); dispose(); }; }
   if (signal.aborted) session.dispose();
@@ -433,7 +444,7 @@ export class AgentEngine {
       }
       case 'compaction_start': this.send(run, { type: 'notice', message: '正在压缩会话上下文…' }); break;
       case 'compaction_end':
-        if (event.errorMessage && !event.aborted) this.fail(run, `上下文压缩失败：${event.errorMessage}`);
+        if (event.errorMessage && !event.aborted) this.fail(run, translate(run.request.locale ?? DEFAULT_LOCALE, '上下文压缩失败：{details}', { details: event.errorMessage }));
         break;
       case 'agent_settled': run.settled = true; run.resolveSettled(); break;
     }
@@ -505,7 +516,7 @@ export class AgentEngine {
       try {
         await run.session?.abort();
         await (run.cleanup ?? this.killCommands());
-      } catch (error) { run.failure ??= `任务清理失败：${String(error)}`; }
+      } catch (error) { run.failure ??= translate(run.request.locale ?? DEFAULT_LOCALE, '任务清理失败：{details}', { details: String(error) }); }
       unsubscribe?.();
       run.session?.dispose();
       for (const [index] of run.parts) this.endPart(run, index, true);

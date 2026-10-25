@@ -15,6 +15,26 @@ async function setup() {
   return { root, project, store, p, s };
 }
 describe('durable UI index', () => {
+  it('migrates missing or invalid language settings and persists valid settings without changing history', async () => {
+    const { store, s } = await setup();
+    expect(store.settings().locale).toBe('zh-CN');
+    for (const legacyLocale of [undefined, 'fr', null, 123]) {
+      const legacy = JSON.parse(await fs.readFile(store.indexFile, 'utf8'));
+      if (legacyLocale === undefined) delete legacy.settings.locale; else legacy.settings.locale = legacyLocale;
+      await fs.writeFile(store.indexFile, JSON.stringify(legacy));
+      const reopened = new Store(store.dataDir); await reopened.init();
+      expect(reopened.settings().locale).toBe('zh-CN');
+      expect(reopened.session(s.id).id).toBe(s.id);
+    }
+    for (const locale of ['en', 'ja', 'ko', 'zh-CN'] as const) {
+      await store.setLocale(locale);
+      const reopened = new Store(store.dataDir); await reopened.init();
+      expect(reopened.settings().locale).toBe(locale);
+      expect(reopened.session(s.id).id).toBe(s.id);
+    }
+    for (const invalid of ['fr', '', null, 123, undefined]) await expect(store.setLocale(invalid as any)).rejects.toThrow('语言设置无效');
+    expect(store.settings().locale).toBe('zh-CN');
+  });
   it('loads fresh local budgets and refuses credential or endpoint injection through the deployment profile', async () => {
     const { root } = await setup();
     const fresh = path.join(root, 'fresh'); await fs.mkdir(fresh);

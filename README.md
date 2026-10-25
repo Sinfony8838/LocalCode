@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A local-first coding desktop for Windows: Electron + React + TypeScript, a separate agent worker for each conversation, and Ollama inference on your own computer. Read and edit project files, review changes, approve terminal commands, and resume saved conversations in a Chinese-language desktop UI. Optional external providers support OpenAI Chat Completions, Responses, and Anthropic Messages.
+A local-first coding desktop for Windows: Electron + React + TypeScript, a separate agent worker for each conversation, and Ollama inference on your own computer. Read and edit project files, review changes, approve terminal commands, and resume saved conversations in Simplified Chinese, English, Japanese, or Korean. Optional external providers support OpenAI Chat Completions, Responses, and Anthropic Messages.
 
 This repository contains the application architecture, source, tests, dependency lockfile, and bootstrap scripts.
 
@@ -11,6 +11,12 @@ Tasks can start without a project folder. Choose a workspace above the composer 
 Conversation text uses the system sans-serif font, with a 14 px default size, 24 px line height, and 12 px paragraph spacing. Font size remains adjustable in Settings → Appearance. Stop status and elapsed time share one line; completed runs show elapsed time before the final reply. File cards show three files initially and expand to reveal the rest. Routine coverage notes are hidden, while actual statistics errors remain visible.
 
 > **Release hold:** the known application-data isolation issue remains unresolved. Previous validation artifacts are not recommended releases; passing build or onboarding checks does not establish release readiness.
+
+## Interface and reply language
+
+Open **Settings → Language** (initially **设置 → 语言**) to choose **简体中文 / English / 日本語 / 한국어**. The interface updates immediately and the choice is saved across restarts. Existing conversations use the new default reply language from their next turn; an active turn keeps its starting language. Explicit reply or translation language requests take priority: a Chinese question asking for an English answer should receive English. User messages, model responses, code, file paths, and tool output are preserved in their original language.
+
+The language policy is verified through request capture with a local mock model; live model compliance has not been evaluated in this change.
 
 ## Quick start: choose the download that fits you
 
@@ -37,7 +43,7 @@ Opening LocalCode does not install your project's language runtimes or build too
 
 ### Prebuilt portable desktop: extract and open
 
-A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.18-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
+A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.19-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
 
 1. Double-click the extracted **`Start.cmd`**. No build tools or model downloads are needed to open the desktop.
 2. Choose your connection in Settings:

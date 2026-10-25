@@ -1,17 +1,17 @@
 # Open-source release review
 
-## 0.1.18 tasks, projects and conversation controls
+## 0.1.19 tasks, projects and conversation controls
 
-Reviewed on 2026-10-25 (Asia/Shanghai), integrating the latest public main including the typography update. Home now navigates without persisting empty conversations. Tasks can start without a workspace and later move into a project with their transcript and context intact. Projects support pinning and persistent collapsed groups. File links stay inline, and only a completed round's final answer has a copy action.
+Reviewed on 2026-10-25 (Asia/Shanghai), integrating public main's typography and multilingual updates. Home now navigates without persisting empty conversations. Tasks can start without a workspace and later move into a project with their transcript and context intact. Projects support pinning and persistent collapsed groups. File links stay inline, and only a completed round's final answer has a copy action. New controls support all four interface languages; projectless replies follow the selected response language.
 
 Validation of this integrated source:
 
 | Check | Result |
 | --- | --- |
 | TypeScript and production build | PASS |
-| Unit/integration regression | PASS; 141 passed, 2 platform/interactive checks skipped |
-| Source Electron task/project, typography, artifact, checkpoint and model-setup suites | PASS |
-| Windows packaging and packaged artifact/typography/task-project/home suites | PASS |
+| Unit/integration regression | PASS; 168 passed, 2 platform/interactive checks skipped |
+| Source Electron task/project, language, typography, artifact, checkpoint and model-setup suites | PASS |
+| Windows packaging and packaged artifact/language/typography/task-project/home suites | PASS |
 | Portable bundle allowlist | PASS; 3 passed, Windows symlink privilege check skipped |
 | Scanner positive/negative controls, exact staged-source credential comparison and Gitleaks | PASS |
 | npm install audit | PASS; 0 reported vulnerabilities |

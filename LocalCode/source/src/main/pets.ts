@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { DEFAULT_PET, PET_NAMES, type PetAnimation, type PetCharacter, type PetDragInput, type PetId, type PetPreferences, type PetSnapshot } from '../shared/pets';
 import type { AgentEvent } from '../shared/contracts';
 import { clampPetPosition, lookDirection, petActivity } from '../core/pet-state';
+import { DEFAULT_LOCALE, translate, type AppLocale } from '../shared/i18n';
 
 const prefs = z.object({ enabled: z.boolean(), selected: z.enum(['paimon', 'ronova']), size: z.union([z.literal(128), z.literal(160), z.literal(192)]), alwaysOnTop: z.boolean(), paused: z.boolean(), followCursor: z.boolean(), position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional() }).strict();
 const patch = prefs.omit({ position: true }).partial().strict();
@@ -27,7 +28,7 @@ export class PetController {
   private dragAnimation?: PetAnimation;
   private cursor?: { x: number; y: number; movedAt: number };
   private pointerDrag?: { id: string; screenX: number; screenY: number; x: number; y: number };
-  constructor(private home: string, private dist: string, private mainWindow: () => BrowserWindow | undefined, private openMain: () => void) {}
+  constructor(private home: string, private dist: string, private mainWindow: () => BrowserWindow | undefined, private openMain: () => void, private locale: () => AppLocale = () => DEFAULT_LOCALE) {}
   private get file() { return path.join(this.home, 'data', 'pets.json'); }
   private async atlas(id: PetId): Promise<{ file: string; source: 'bundled' | 'imported'; bytes: Buffer } | undefined> {
     for (const [file, source] of [[path.join(this.home, 'data/pets', `${id}.png`), 'imported'], [path.join(this.dist, 'renderer/pets', `${id}.png`), 'bundled']] as const) {
@@ -55,7 +56,8 @@ export class PetController {
   private async refreshCharacters() {
     this.characters = await Promise.all((['paimon', 'ronova'] as PetId[]).map(async id => { const image = await this.atlas(id); return { id, name: PET_NAMES[id], available: !!image, source: image?.source ?? 'missing', version: image ? createHash('sha256').update(image.bytes).digest('hex').slice(0, 16) : '' }; }));
   }
-  snapshot(): PetSnapshot { return structuredClone({ preferences: this.preferences, characters: this.characters, ...this.activity, ...(this.dragAnimation ? { animation: this.dragAnimation } : {}), lookDirection: this.direction }); }
+  snapshot(): PetSnapshot { return structuredClone({ locale: this.locale(), preferences: this.preferences, characters: this.characters, ...this.activity, ...(this.dragAnimation ? { animation: this.dragAnimation } : {}), lookDirection: this.direction }); }
+  refreshLocale() { this.window?.setTitle(translate(this.locale(), 'LocalCode 桌宠')); this.broadcast(); }
   private broadcast() {
     const state = this.snapshot(), fingerprint = JSON.stringify(state);
     if (fingerprint === this.fingerprint) return; this.fingerprint = fingerprint;
@@ -82,7 +84,7 @@ export class PetController {
     if (this.closing) return;
     if (!this.preferences.enabled || !this.characters.find(c => c.id === this.preferences.selected)?.available) { await this.finishPointerDrag(); this.window?.hide(); this.broadcast(); return; }
     if (!this.window || this.window.isDestroyed()) {
-      const w = this.window = new BrowserWindow({ ...this.dimensions(), title: 'LocalCode 桌宠', transparent: true, frame: false, hasShadow: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false, skipTaskbar: true, alwaysOnTop: this.preferences.alwaysOnTop, show: false, backgroundColor: '#00000000', autoHideMenuBar: true, webPreferences: { preload: path.join(this.dist, 'pet-preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } });
+      const w = this.window = new BrowserWindow({ ...this.dimensions(), title: translate(this.locale(), 'LocalCode 桌宠'), transparent: true, frame: false, hasShadow: false, resizable: false, maximizable: false, minimizable: false, fullscreenable: false, skipTaskbar: true, alwaysOnTop: this.preferences.alwaysOnTop, show: false, backgroundColor: '#00000000', autoHideMenuBar: true, webPreferences: { preload: path.join(this.dist, 'pet-preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } });
       w.setIgnoreMouseEvents(true, { forward: true });
       w.webContents.setWindowOpenHandler(() => ({ action: 'deny' })); w.webContents.on('will-navigate', event => event.preventDefault());
       w.on('close', event => { if (!this.closing) { event.preventDefault(); void this.save({ enabled: false }); } });
@@ -110,7 +112,7 @@ export class PetController {
     await this.persist(); await this.syncWindow(); this.broadcast(); return this.snapshot();
   }
   async importAtlas(id: PetId) {
-    const choice = await dialog.showOpenDialog(this.mainWindow()!, { title: `导入${PET_NAMES[id]}原始动画图集`, properties: ['openFile'], filters: [{ name: '1536×2288 RGBA 动画图集', extensions: ['png'] }] });
+    const choice = await dialog.showOpenDialog(this.mainWindow()!, { title: translate(this.locale(), '导入 {name} 原始动画图集', { name: translate(this.locale(), PET_NAMES[id]) }), properties: ['openFile'], filters: [{ name: translate(this.locale(), '1536×2288 RGBA 动画图集'), extensions: ['png'] }] });
     if (choice.canceled || !choice.filePaths[0]) return this.snapshot();
     const file = choice.filePaths[0], info = await fs.stat(file);
     if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error('图集必须是小于 16MiB 的 PNG 文件。');
