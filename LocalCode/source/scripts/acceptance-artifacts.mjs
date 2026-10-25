@@ -117,7 +117,7 @@ try {
   finalGate.release(); await terminal(id);
   await runCard(firstRun).waitFor(); assert.equal(await summaries().count(), 1);
   assert.equal(await runCard(firstRun).getAttribute('aria-label'), '本轮运行记录');
-  assert.match(await runCard(firstRun).innerText(), /不代表测试或任务验收通过/);
+  assert(!(await runCard(firstRun).innerText()).includes('不代表测试或任务验收通过'));
   assert.match(await runCard(firstRun).innerText(), /2\s*个文件/);
   assert.match(await runCard(firstRun).innerText(), /demo\.html/); assert.match(await runCard(firstRun).innerText(), /notes\.txt/);
   checks.push('Copyable intermediate messages and completed tools produce no summary; one settled run creates one summary and deduplicates three writes into two files');
