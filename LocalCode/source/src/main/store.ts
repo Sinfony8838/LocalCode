@@ -111,7 +111,7 @@ export class Store {
   async createSession(projectId: string | null = null) {
     if (projectId !== null) this.project(projectId);
     const now = new Date().toISOString();
-    const session: SessionView = { id: randomUUID(), projectId, title: '新会话', createdAt: now, updatedAt: now, providerId: 'local', status: 'idle', messages: [], tools: [] };
+    const session: SessionView = { id: randomUUID(), projectId, title: '新会话', createdAt: now, updatedAt: now, providerId: 'local', status: 'idle', approvalMode: 'ask', workMode: 'execute', messages: [], tools: [] };
     this.state.sessions.unshift(session); await this.persist(); return structuredClone(session);
   }
   async moveSession(sessionId: string, projectId: string) {

@@ -15,6 +15,13 @@ async function setup() {
   return { root, project, store, p, s };
 }
 describe('durable UI index', () => {
+  it('creates idle sessions with durable mode defaults so a restart does not mutate them', async () => {
+    const { store } = await setup();
+    const idle = await store.createSession();
+    expect(idle).toMatchObject({approvalMode:'ask',workMode:'execute',status:'idle'});
+    const reopened = new Store(store.dataDir); await reopened.init();
+    expect(reopened.session(idle.id)).toEqual(idle);
+  });
   it('migrates missing or invalid language settings and persists valid settings without changing history', async () => {
     const { store, s } = await setup();
     expect(store.settings().locale).toBe('zh-CN');
