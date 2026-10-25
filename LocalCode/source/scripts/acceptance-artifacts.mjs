@@ -106,7 +106,9 @@ try {
   const id = await newSession('ARTIFACT_COMPLETION_ROUND_ONE');
   const firstRun = (await state(id)).runId;
   await poll(async () => { const s = await state(id); return s.tools.length === 1 && s.tools[0].status === 'completed' && s.messages.some(m => m.role === 'assistant' && !m.partial && m.text.includes('阶段性说明')); }, 'intermediate message ended');
-  assert(await page.locator('.assistant-message').filter({ hasText: '阶段性说明：正在创建网页' }).getByRole('button', { name: '复制回答', exact: true }).count());
+  const intermediateCopy = page.locator('.assistant-message').filter({ hasText: '阶段性说明：正在创建网页' }).getByRole('button', { name: '复制回答', exact: true });
+  await intermediateCopy.waitFor({ state: 'visible' });
+  assert(await intermediateCopy.count());
   assert.equal(await summaries().count(), 0, 'An ended/copyable intermediate message must not complete a run');
   await page.screenshot({ path: path.join(root, '01-intermediate-no-summary.png') });
   afterFirst.release();
@@ -150,6 +152,9 @@ try {
 
   await page.getByRole('link', { name: '打开网页', exact: true }).click({ button: 'right' });
   const menu = page.getByRole('menu'); await menu.waitFor();
+  // The container first shows a loading state while artifactInfo resolves.
+  // Wait for capability readiness, not arbitrary time or only container presence.
+  await menu.getByRole('menuitem', { name: '在应用内预览', exact: true }).waitFor({ state: 'visible' });
   const menuLabels = await menu.getByRole('menuitem').allTextContents();
   assert(menuLabels.some(t => /预览/.test(t))); assert(menuLabels.some(t => /源码/.test(t))); assert(menuLabels.some(t => /默认/.test(t))); assert(menuLabels.some(t => /选择.*应用|打开方式/.test(t))); assert(menuLabels.some(t => /文件夹|资源管理器/.test(t))); assert(menuLabels.some(t => /复制.*路径/.test(t)));
   await page.screenshot({ path: path.join(root, '04-artifact-context-menu.png') });
@@ -255,7 +260,7 @@ try {
   const menuFits = await page.getByRole('menu').evaluate(element => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.top >= 0 && box.right <= innerWidth + 1 && box.bottom <= innerHeight + 1; });
   assert(menuFits, 'Artifact context menu must fit viewport at 20px');
   await page.screenshot({ path: path.join(root, '05-dark-20px-history.png') });
-  await page.keyboard.press('Escape'); assert.equal(await page.getByRole('menu').count(), 0);
+  await page.keyboard.press('Escape'); await page.getByRole('menu').waitFor({ state: 'detached' }); assert.equal(await page.getByRole('menu').count(), 0);
   await app.close(); app = undefined; await launch(); await select(id);
   await poll(async () => await summaries().count() === 2, 'persisted per-run summaries');
   assert.match(await runCard(firstRun).innerText(), /2\s*个文件/); assert.match(await runCard(secondRun).innerText(), /1\s*个文件/);
