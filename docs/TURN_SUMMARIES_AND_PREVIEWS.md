@@ -6,7 +6,9 @@ Introduced in 0.1.13. The desktop UI uses Chinese labels.
 
 A turn starts when you send a task and ends after its agent work, pending approvals, and command cleanup have settled. A copy button on an intermediate assistant reply, an ended thinking block, or a finished tool call does not end the turn.
 
-The final assistant reply describes the work and actual checks. A separate, collapsible record shows the turn's status, elapsed time, changed files, change kinds, and added/removed line counts. Producing this record does not make another model request. Normal completion shows **本轮已完成**; cancellation and failure show **本轮已停止** and **本轮运行失败**. These states describe how execution ended, not an independent guarantee that the model fulfilled every requirement.
+The final assistant reply describes the work and actual checks. A separate, collapsible record shows the turn's status, elapsed time, changed files, change kinds, and added/removed line counts. Producing this record does not make another model request. Normal runtime completion shows **本轮运行结束**; cancellation and failure show **本轮已停止** and **本轮运行失败**. The record explicitly says that runtime status does not certify tests or task acceptance. It does not classify an arbitrary successful terminal command as a passing test.
+
+Each turn permits at most 12 tool calls. After the twelfth result, the runtime permits one final visible assistant response with no tools available, using the configured output-token limit. If context compaction is needed first, up to two separate, tool-free compaction requests may prepare the history and split-turn context; they do not consume the visible response allowance. This final phase therefore allows at most two compaction requests plus one visible response, not just one total inference request. Additional tool execution, visible-summary requests, and post-summary auto-compaction are blocked. The final response can explain existing results and unverified work; it does not extend the tool budget. The turn then retains a failed status with an explicit **工具调用预算已耗尽** explanation, rather than claiming that the task passed. A new user turn gets its own budget, normal tools, and normal auto-compaction. Cancellation during the summary remains interrupted, and a provider/output error retains its actual cause.
 
 Each turn retains its own record when you continue the conversation or restart the app. Unfinished work recovered after an abnormal exit is marked interrupted. Older conversations without turn records do not gain invented historical summaries.
 
@@ -19,6 +21,8 @@ The app combines file-tool records with bounded snapshots of readable project te
 Automatic scanning is limited to 1,000 candidate files, 300 directories, 16 MiB of readable text in total, and 2 MiB per text file. Dependencies, build outputs, model/runtime directories, protected metadata, `.env` files, links, binary files, and application data are outside automatic text statistics. File-tool records supplement these snapshots. The UI reports incomplete scans, unavailable records, and unknown line counts explicitly; an empty partial result is not presented as proof of zero changes.
 
 The existing **修改** panel still shows the conversation's cumulative file-tool differences and conflict-aware undo. A turn summary is a historical observation; it does not expand undo to terminal edits or overwrite later changes. After an abnormal exit, recovery may have only saved file-tool records, with terminal changes and final disk state unconfirmed.
+
+The full-text starting snapshot is temporary: it is removed only after the terminal summary has been saved to the application index. A failed index save keeps the snapshot; startup recovery retries cleanup for durably recorded completed, failed, and interrupted turns. The independent file-tool journal remains available for undo.
 
 ## Opening generated files
 
@@ -36,6 +40,8 @@ Right-click a file entry, press Shift+F10 while its link is focused, or use the 
 | 复制完整路径 | Copy its validated absolute path |
 
 Unavailable actions are disabled. File links may be relative to the selected project or absolute paths inside it; links outside that project are rejected. Deleted files remain listed in the summary without an open link. Preview and source views show the current disk file, rather than reconstructing its historical contents.
+
+File-browser, tool, summary, and inline-code filenames are literal filesystem paths. Markdown link/image destinations and explicit `file:` URLs are URI references and decode exactly once: `report%20final.txt` links to `report final.txt`, while `report%2520final.txt` links to the literal `report%20final.txt`. Refresh, source view, and menu actions retain the resolved literal filename.
 
 ## Preview support and boundaries
 

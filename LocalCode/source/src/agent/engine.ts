@@ -3,7 +3,7 @@ import { appendFileSync, existsSync } from 'node:fs';
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Compile } from 'typebox/compile';
-import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
+import { InMemoryCredentialStore, normalizeContext } from '@earendil-works/pi-ai';
 import { createAgentSession, createExtensionRuntime, ModelRuntime, SessionManager, SettingsManager,
   type AgentSessionEvent, type ResourceLoader, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentEvent, Approval, RunRequest, WorkerCommand, RunProgress } from '../shared/contracts.js';
@@ -26,6 +26,8 @@ export interface EngineToolContext {
   emit(event: AgentEvent): void;
   requestApproval(input: { command: string; cwd: string }, signal?: AbortSignal): Promise<boolean>;
   beforeTool(name: string, args: unknown): void;
+  /** True only for the single, tool-disabled response allowed after the tool budget. */
+  beforeModelRequest?(purpose?: 'assistant' | 'compaction'): boolean;
   acquireRequest?(signal: AbortSignal): Promise<RequestLease>;
   telemetry?(type: string, fields?: Record<string, unknown>): void;
   transportFailure?(message: string): void;
@@ -38,6 +40,7 @@ export interface EngineOptions {
 interface ActiveRun {
   request: RunRequest; controller: AbortController; session?: EngineSession;
   toolCalls: number; invalidCalls: number; assistantSeq: number; messageId?: string;
+  budgetExhausted: boolean; summaryRequests: number; summaryCompactionRequests: number;
   userAborted: boolean; failure?: string; settled: boolean;
   settledPromise: Promise<void>; resolveSettled(): void;
   done: Promise<void>; pending: Map<string, { resolve(value: boolean): void }>;
@@ -61,6 +64,12 @@ function redactValue<T>(value: T, key: string): T {
   }
   return value;
 }
+
+const MAX_TOOL_CALLS = 12;
+// pi may compact a history and a split-turn prefix with separate requests.
+const MAX_FINAL_COMPACTION_REQUESTS = 2;
+const BUDGET_EXHAUSTED = '本轮 12 次工具调用预算已耗尽，未继续执行工具。已收到的回复和文件修改已保留；请根据实际验证结果判断完成情况，需要继续时请发送新消息。';
+const FINAL_SUMMARY_PROMPT = '本轮工具调用预算已耗尽。现在只能输出最后一条简短中文总结，禁止再调用任何工具。仅根据已有结果说明已做的工作、实际验证结果，以及未完成或未验证的事项；不要把预算耗尽说成任务已通过验收。';
 
 const SYSTEM_PROMPT = `你是 LocalCode，本机中文编程助手。只使用提供的工具完成用户任务。
 先浏览和分页读取相关文件，再做最小必要修改。不要臆测文件内容。文件路径相对当前项目。
@@ -181,6 +190,24 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
     noTools: 'builtin', tools: customTools.map(tool => tool.name), customTools,
   });
   session.agent.toolExecution = 'sequential';
+  const stream = session.agent.streamFunction;
+  session.agent.streamFunction = (model, ctx, options) => {
+    // pi also uses this function for hidden compaction. It must not consume or
+    // receive the prompt for the user-visible final response.
+    if (!context.beforeModelRequest?.(session.isCompacting ? 'compaction' : 'assistant')) return stream(model, ctx, options);
+    // Preparation may compact first; once the final response starts, no hidden
+    // post-response compaction or overflow retry may extend this final phase.
+    session.setAutoCompactionEnabled(false);
+    // Tool declarations may live in any system message, not just ctx.tools.
+    // Modify only this request: resumed turns must retain their normal tool loadout.
+    const messages = ctx.messages.map(message => {
+      if (message.role !== 'system') return message;
+      const { toolsAdded: _added, toolsRemoved: _removed, ...rest } = message;
+      return rest;
+    });
+    return stream(model, normalizeContext({ messages: [...messages,
+      { role: 'system', content: FINAL_SUMMARY_PROMPT, timestamp: Date.now() }], tools: [] }), options);
+  };
   if (transport) { const dispose = session.dispose.bind(session); session.dispose = () => { transport.close(); dispose(); }; }
   if (signal.aborted) session.dispose();
   signal.throwIfAborted();
@@ -224,7 +251,8 @@ export class AgentEngine {
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(command.runId)) throw new Error('任务标识无效。');
     let resolveSettled!: () => void;
     const run: ActiveRun = { request: command, controller: new AbortController(), toolCalls: 0, invalidCalls: 0,
-      assistantSeq: 0, userAborted: false, settled: false, pending: new Map(), startedAt: Date.now(),
+      assistantSeq: 0, budgetExhausted: false, summaryRequests: 0, summaryCompactionRequests: 0,
+      userAborted: false, settled: false, pending: new Map(), startedAt: Date.now(),
       redactionKey: cloudKey(command), streamBuffers: new Map(), parts: new Map(),
       settledPromise: new Promise<void>(resolve => { resolveSettled = resolve; }), resolveSettled: () => resolveSettled(), done: Promise.resolve() };
     this.active = run;
@@ -380,18 +408,21 @@ export class AgentEngine {
         break;
       case 'tool_execution_start':
         this.send(run, { type: 'progress', progress: { phase: 'tool', since: new Date().toISOString() } });
-        ++run.toolCalls;
         this.send(run, { type: 'tool_start', toolCallId: event.toolCallId, name: event.toolName, args: event.args });
-        if (run.toolCalls > 12) this.fail(run, '已达到每轮 12 次工具调用上限，请发送新消息继续。');
+        if (run.toolCalls >= MAX_TOOL_CALLS) this.fail(run, BUDGET_EXHAUSTED);
+        else ++run.toolCalls;
         break;
       case 'tool_execution_end': {
         const text = resultText(event.result);
         this.send(run, { type: 'tool_result', toolCallId: event.toolCallId, result: text, isError: event.isError });
         if (event.isError && /^(?:Validation failed for tool |Invalid arguments for tool |Tool .+ not found)/.test(text)) {
           if (++run.invalidCalls >= 2) this.fail(run, '工具参数再次未通过验证，本轮已停止。请调整请求后重试。');
-          else this.send(run, { type: 'notice', message: '工具参数未通过验证，允许模型纠正一次；无效调用未执行。' });
+          else if (run.toolCalls < MAX_TOOL_CALLS) this.send(run, { type: 'notice', message: '工具参数未通过验证，允许模型纠正一次；无效调用未执行。' });
         }
-        if (run.toolCalls >= 12 && !run.controller.signal.aborted) this.fail(run, '已达到每轮 12 次工具调用上限，请发送新消息继续。');
+        if (run.toolCalls >= MAX_TOOL_CALLS && !run.controller.signal.aborted && !run.budgetExhausted) {
+          run.budgetExhausted = true;
+          this.send(run, { type: 'notice', message: '本轮 12 次工具调用预算已耗尽，正在根据已有结果生成最后一条总结；不会再执行工具。' });
+        }
         break;
       }
       case 'compaction_start': this.send(run, { type: 'notice', message: '正在压缩会话上下文…' }); break;
@@ -430,7 +461,24 @@ export class AgentEngine {
         requestApproval: (input, signal) => this.requestApproval(run, input, signal),
         beforeTool: () => {
           run.controller.signal.throwIfAborted();
-          if (this.active !== run || run.toolCalls > 12) throw new Error('当前任务已失效或已达到工具调用上限。');
+          if (this.active !== run || run.budgetExhausted) throw new Error('当前任务已失效或已达到工具调用上限。');
+        },
+        beforeModelRequest: (purpose = 'assistant') => {
+          run.controller.signal.throwIfAborted();
+          if (!run.budgetExhausted) return false;
+          if (purpose === 'compaction') {
+            if (run.summaryRequests === 0 && run.summaryCompactionRequests < MAX_FINAL_COMPACTION_REQUESTS) {
+              run.summaryCompactionRequests++;
+              return false;
+            }
+            const message = '本轮工具预算已耗尽，收尾上下文整理达到请求上限或最终回复已经开始，已停止进一步请求。已有回复和修改已保留，请发送新消息继续。';
+            this.fail(run, message);
+            throw new Error(message);
+          }
+          if (run.summaryRequests === 0) { run.summaryRequests++; return true; }
+          // Even a provider ignoring the no-tools request cannot extend the loop.
+          this.fail(run, BUDGET_EXHAUSTED);
+          throw new Error(BUDGET_EXHAUSTED);
         },
       };
       run.session = await this.createSession(request, context, run.controller.signal);
@@ -456,8 +504,10 @@ export class AgentEngine {
       for (const [index] of run.parts) this.endPart(run, index, true);
       for (const messageId of run.streamBuffers.keys()) this.streamText(run, messageId, '', true);
       if (this.active === run) this.active = undefined;
+      if (run.budgetExhausted && !run.userAborted) run.failure ??= BUDGET_EXHAUSTED;
       const status = run.userAborted ? 'interrupted' : run.failure ? 'failed' : 'completed';
       this.log(run, { type: 'run_settled', status, toolCalls: run.toolCalls, invalidCalls: run.invalidCalls,
+        summaryRequests: run.summaryRequests, summaryCompactionRequests: run.summaryCompactionRequests,
         firstTextMs: run.firstTextAt ? run.firstTextAt - run.startedAt : undefined,
         firstThinkingMs: run.firstThinkingAt ? run.firstThinkingAt - run.startedAt : undefined });
       if (run.failure && !run.userAborted) this.send(run, { type: 'error', message: run.failure });

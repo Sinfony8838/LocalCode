@@ -35,7 +35,7 @@ describe('project artifact metadata', () => {
   it('accepts relative, absolute and local file URLs and retains encoded names', async () => {
     const f = await fixture(); const relative = 'outputs/页面 #1.html'; const absolute = path.join(f.project, relative);
     for (const input of [relative, absolute, pathToFileURL(absolute).href]) {
-      const info = await f.previews.info(f.project, input);
+      const info = await f.previews.info(f.project, input, input.startsWith('file:') ? 'reference' : 'path');
       expect(info).toMatchObject({ path: relative, absolutePath: absolute, name: '页面 #1.html', kind: 'html', canOpenExternally: true });
       expect(info.previewUrl).toMatch(/^localcode-preview:\/\/[\da-f-]+\/outputs\/%/);
       const response = await f.previews.response({ url: info.previewUrl!, method: 'GET' });
@@ -46,11 +46,34 @@ describe('project artifact metadata', () => {
     const f = await fixture(); const relative = 'outputs/页面 #1.html'; const absolute = path.join(f.project, relative);
     const encoded = relative.split('/').map(encodeURIComponent).join('/');
     for (const input of [encoded, `${encoded}:12`, `${encoded}:12:3`, `${encoded}#L12`, `${encoded}#L12-L14`, `${pathToFileURL(absolute).href}#L12`, `${absolute}:12`]) {
-      expect((await resolveArtifactPath(f.project, input)).relative).toBe(relative);
+      expect((await resolveArtifactPath(f.project, input, 'reference')).relative).toBe(relative);
     }
     for (const invalid of ['%2e%2e%2foutside%2fescape.html:1', '%2Egit/config#L1', 'javascript%3Aalert(1)', 'outputs/bad.html%3Astream', `${pathToFileURL(path.join(f.outside, 'escape.html')).href}#L1`]) {
-      await expect(resolveArtifactPath(f.project, invalid)).rejects.toThrow();
+      await expect(resolveArtifactPath(f.project, invalid, 'reference')).rejects.toThrow();
     }
+  });
+  it('keeps literal filesystem names separate from URI references even when both targets exist', async () => {
+    const f = await fixture();
+    const names = ['report%20final.txt', 'report final.txt', 'report%2520final.txt', 'notes.txt#L12', 'notes.txt', 'bad%FF.txt'];
+    for (const name of names) await fs.writeFile(path.join(f.project, 'outputs', name), name);
+    for (const name of names) {
+      const relative = `outputs/${name}`;
+      for (const input of [relative, path.join(f.project, relative)]) {
+        const info = await f.previews.info(f.project, input);
+        expect(info.path).toBe(relative);
+        expect(await fs.readFile(info.absolutePath, 'utf8')).toBe(name);
+        // Metadata is a raw path on refresh, source view and context-menu actions.
+        expect((await f.previews.info(f.project, info.path)).path).toBe(relative);
+      }
+      for (const input of [relative.split('/').map(encodeURIComponent).join('/'), pathToFileURL(path.join(f.project, relative)).href]) {
+        expect((await f.previews.info(f.project, input, 'reference')).path).toBe(relative);
+      }
+    }
+    expect((await resolveArtifactPath(f.project, 'outputs/report%20final.txt', 'reference')).relative).toBe('outputs/report final.txt');
+    expect((await resolveArtifactPath(f.project, 'outputs/report%2520final.txt', 'reference')).relative).toBe('outputs/report%20final.txt');
+    expect((await resolveArtifactPath(f.project, 'outputs/notes.txt#L12', 'reference')).relative).toBe('outputs/notes.txt');
+    await expect(resolveArtifactPath(f.project, 'outputs/bad%FF.txt', 'reference')).rejects.toThrow('URI');
+    await expect(resolveArtifactPath(f.project, pathToFileURL(path.join(f.project, 'outputs/notes.txt')).href)).rejects.toThrow();
   });
   it('rejects remote URLs, traversal, outside absolute paths, ADS and protected git links', async () => {
     const f = await fixture();
@@ -76,6 +99,22 @@ describe('project artifact metadata', () => {
 });
 
 describe('isolated preview capability', () => {
+  it('escapes literal percent and fragment names once in HTML preview and relative resources', async () => {
+    const f = await fixture();
+    const names = ['report%20final.html', 'report final.html', 'report%2520final.html', 'page#L12.html'];
+    for (const name of names) await fs.writeFile(path.join(f.project, 'outputs', name), `<h1>${name}</h1>`);
+    await fs.writeFile(path.join(f.project, 'outputs/assets/style%20final.css'), '/* literal percent */');
+    await fs.writeFile(path.join(f.project, 'outputs/assets/style final.css'), '/* space */');
+    for (const name of names) {
+      const info = await f.previews.info(f.project, `outputs/${name}`);
+      expect(new URL(info.previewUrl!).pathname).toBe(`/outputs/${encodeURIComponent(name)}`);
+      expect(await (await f.previews.response({ url: info.previewUrl!, method: 'GET' })).text()).toBe(`<h1>${name}</h1>`);
+      for (const [reference, content] of [['assets/style%2520final.css', '/* literal percent */'], ['assets/style%20final.css', '/* space */']]) {
+        const response = await f.previews.response({ url: new URL(reference, info.previewUrl!).href, method: 'GET' });
+        expect(response.status).toBe(200); expect(await response.text()).toBe(content);
+      }
+    }
+  });
   it('serves relative scripts/css and sets sandbox, no-network, no-cache policy', async () => {
     const f = await fixture(); const info = await f.previews.info(f.project, 'outputs/页面 #1.html');
     for (const [resource, mime] of [['assets/app.js', 'text/javascript'], ['assets/style.css', 'text/css']]) {

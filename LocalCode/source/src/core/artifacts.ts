@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { normalizeRelative, resolveWorkspacePath } from './workspace';
-import type { ArtifactInfo, ArtifactKind } from '../shared/artifacts';
+import type { ArtifactInfo, ArtifactInputKind, ArtifactKind } from '../shared/artifacts';
 
 export const PREVIEW_SCHEME = 'localcode-preview';
 export const MAX_PREVIEW_BYTES = 32 * 1024 * 1024;
@@ -27,24 +27,25 @@ const assetTypes: Record<string, string> = {
 };
 
 /** Links are data: only project-contained filesystem references may reach the OS. */
-export async function resolveArtifactPath(projectPath: string, input: string) {
+export async function resolveArtifactPath(projectPath: string, input: string, inputKind: ArtifactInputKind = 'path') {
   if (typeof input !== 'string' || !input || input.length > 4096 || /[\0\r\n]/.test(input)) throw new Error('无效的文件路径。');
-  // Markdown file references may append editor locations. Remove only conventional
-  // line suffixes, before URI decoding, so encoded literal # characters stay literal.
-  let candidate = input.replace(/#L\d+(?:-L?\d+)?$/i, '').replace(/:\d+(?::\d+)?$/, '');
-  if (/^file:/i.test(candidate)) {
-    const url = new URL(candidate);
-    if (url.username || url.password || url.search || url.hash || (url.hostname && url.hostname !== 'localhost')) throw new Error('只允许项目内的本地文件链接。');
-    candidate = fileURLToPath(url);
-  } else {
-    if (/%[\da-f]{2}/i.test(candidate)) {
+  let candidate = input;
+  if (inputKind === 'reference') {
+    // Strip editor locations before decoding so encoded literal # characters stay
+    // literal. Never apply reference syntax to names returned by filesystem APIs.
+    candidate = candidate.replace(/#L\d+(?:-L?\d+)?$/i, '').replace(/:\d+(?::\d+)?$/, '');
+    if (/^file:/i.test(candidate)) {
+      const url = new URL(candidate);
+      if (url.username || url.password || url.search || url.hash || (url.hostname && url.hostname !== 'localhost')) throw new Error('只允许项目内的本地文件链接。');
+      candidate = fileURLToPath(url);
+    } else if (/%[\da-f]{2}/i.test(candidate)) {
       try { candidate = decodeURIComponent(candidate); }
       catch { throw new Error('文件链接的 URI 编码无效。'); }
     }
-    if (/^[a-z][a-z\d+.-]*:/i.test(candidate) && !/^[a-z]:[\\/]/i.test(candidate)) throw new Error('此操作只接受本地文件。');
+    // Markdown tools sometimes use /D:/folder/file.html for Windows absolute links.
+    if (process.platform === 'win32' && /^\/[a-z]:[\\/]/i.test(candidate)) candidate = candidate.slice(1);
   }
-  // Markdown tools sometimes use /D:/folder/file.html for Windows absolute links.
-  if (process.platform === 'win32' && /^\/[a-z]:[\\/]/i.test(candidate)) candidate = candidate.slice(1);
+  if (/^[a-z][a-z\d+.-]*:/i.test(candidate) && !/^[a-z]:[\\/]/i.test(candidate)) throw new Error('此操作只接受本地文件。');
   const root = await fs.realpath(projectPath);
   if (path.isAbsolute(candidate)) candidate = path.relative(root, path.resolve(candidate));
   return resolveWorkspacePath(root, normalizeRelative(candidate));
@@ -66,8 +67,8 @@ function privateAsset(relative: string) {
 /** One unguessable origin per preview; no app-origin privileges, IPC, network, forms or top navigation. */
 export class ArtifactPreviews {
   private grants = new Map<string, string>();
-  async info(projectPath: string, input: string): Promise<ArtifactInfo> {
-    const target = await resolveArtifactPath(projectPath, input);
+  async info(projectPath: string, input: string, inputKind: ArtifactInputKind = 'path'): Promise<ArtifactInfo> {
+    const target = await resolveArtifactPath(projectPath, input, inputKind);
     const stat = await fs.stat(target.absolute);
     const kind = artifactKind(target.relative);
     const result: ArtifactInfo = { path: target.relative, absolutePath: target.absolute, name: path.basename(target.absolute), kind, size: stat.size, canOpenExternally: !activeExtensions.has(path.extname(target.relative).toLowerCase()) };

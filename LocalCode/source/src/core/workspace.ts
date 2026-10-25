@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ChangeView, FileEntry, FileView } from '../shared/contracts.js';
+import type { ChangeCheckpointPreview, ChangeView, FileEntry, FileView } from '../shared/contracts.js';
 
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_CHECKPOINT_BYTES = 128 * 1024;
 const DISPLAY_CHARS = 200_000;
 const ignored = new Set(['.git', 'node_modules', '.next', '.venv', 'venv', 'dist', 'build', 'coverage', 'models', 'runtime', '$recycle.bin']);
 const locks = new Map<string, Promise<unknown>>();
@@ -131,7 +132,9 @@ export async function readWorkspaceFile(projectPath: string, relativePath: strin
   return { path: rel, content: content.slice(0, DISPLAY_CHARS), truncated: content.length > DISPLAY_CHARS };
 }
 interface ChangeRecord { path: string; projectPath: string; runId: string; before: string | null; after: string; afterHash: string; pending: boolean }
-interface Journal { version: 1; records: ChangeRecord[]; runRecords?: ChangeRecord[] }
+const recordHash = (record: ChangeRecord) => hash(Buffer.from(JSON.stringify([record.path, record.projectPath, record.runId, record.before, record.after, record.afterHash, record.pending])));
+interface CheckpointRecord { id: string; approvedAt: string; previous: ChangeRecord; approved: string; approvedHash: string }
+interface Journal { version: 1; records: ChangeRecord[]; runRecords?: ChangeRecord[]; checkpoints?: CheckpointRecord[] }
 function journalPath(dataDir: string, sessionId: string) { return path.join(dataDir, 'changes', safeId(sessionId), 'index.json'); }
 async function loadJournal(dataDir: string, sessionId: string): Promise<Journal> {
   try {
@@ -143,8 +146,12 @@ async function loadJournal(dataDir: string, sessionId: string): Promise<Journal>
 async function atomicJson(file: string, value: unknown) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temp = `${file}.${randomUUID()}.tmp`;
-  await fs.writeFile(temp, JSON.stringify(value, null, 2), { flag: 'wx' });
-  try { await fs.rename(temp, file); } finally { await fs.unlink(temp).catch(() => {}); }
+  try {
+    const handle = await fs.open(temp, 'wx');
+    try { await handle.writeFile(JSON.stringify(value, null, 2)); await handle.sync(); }
+    finally { await handle.close(); }
+    await fs.rename(temp, file);
+  } finally { await fs.unlink(temp).catch(() => {}); }
 }
 async function locked<T>(key: string, work: () => Promise<T>): Promise<T> {
   const previous = locks.get(key) ?? Promise.resolve();
@@ -178,7 +185,7 @@ export async function writeWorkspaceText(input: { projectPath: string; dataDir: 
     const journal: Journal = structuredClone(original);
     const key = workspacePathKey(rel);
     const existing = journal.records.find(r => workspacePathKey(r.path) === key);
-    if (existing && (before === null || hash(before) !== existing.afterHash)) throw new Error('文件包含本任务之外的新修改；请保留当前内容并新建会话后继续。');
+    if (existing && (before === null || hash(before) !== existing.afterHash)) throw new Error('文件包含本任务之外的新修改；请先结束任务，再在“修改”面板预览并确认当前内容为新起点，或新建会话。');
     const record: ChangeRecord = {
       path: existing?.path ?? rel, projectPath: await fs.realpath(input.projectPath), runId: safeId(input.runId),
       before: existing ? existing.before : before?.toString('base64') ?? null,
@@ -235,5 +242,53 @@ export async function undoChange(dataDir: string, sessionId: string, relativePat
     else await atomicWorkspaceWrite(record.projectPath, rel, Buffer.from(record.before, 'base64'));
     journal.records = journal.records.filter(r => r !== record);
     await atomicJson(file, journal);
+  });
+}
+
+/** UI-only review: return every byte as bounded, valid UTF-8, never a truncated approval. */
+export async function previewChangeCheckpoint(dataDir: string, sessionId: string, relativePath: string): Promise<ChangeCheckpointPreview> {
+  const rel = normalizeRelative(relativePath);
+  return locked(journalPath(dataDir, sessionId), async () => {
+    const journal = await loadJournal(dataDir, sessionId);
+    const record = checkpointRecord(journal, rel);
+    await resolveWorkspacePath(record.projectPath, record.path, { write: true });
+    const current = (await readBytes(record.projectPath, record.path))!;
+    if (current.length > MAX_CHECKPOINT_BYTES) throw new Error('新起点预览仅支持不超过 128KiB 的文本文件；较大文件请保留当前内容并新建会话。');
+    const currentHash = hash(current);
+    if (currentHash === record.afterHash) throw new Error('文件没有需要确认的外部修改，请刷新修改面板。');
+    return { path: record.path, content: decode(current), currentHash, recordHash: recordHash(record), byteLength: current.length };
+  });
+}
+function checkpointRecord(journal: Journal, relativePath: string): ChangeRecord {
+  const record = journal.records.find(r => workspacePathKey(r.path) === workspacePathKey(relativePath));
+  if (!record) throw new Error('没有找到此文件的修改记录。');
+  if (record.pending) throw new Error('上次文件写入未完成，不能创建新起点；请先检查并恢复修改记录。');
+  return record;
+}
+/** Explicit desktop-user approval only. Do not expose this as an agent tool. */
+export async function checkpointChange(dataDir: string, sessionId: string, relativePath: string, expectedHash: string, expectedRecordHash: string): Promise<void> {
+  const rel = normalizeRelative(relativePath); const file = journalPath(dataDir, sessionId);
+  if (!/^[a-f0-9]{64}$/.test(expectedHash) || !/^[a-f0-9]{64}$/.test(expectedRecordHash)) throw new Error('无效的预览校验值，请重新预览。');
+  return locked(file, async () => {
+    const journal = await loadJournal(dataDir, sessionId);
+    const record = checkpointRecord(journal, rel);
+    if (recordHash(record) !== expectedRecordHash) throw new Error('修改记录在预览后已变化，未创建新起点；请取消后重新预览。');
+    // Re-resolve containment and read under the same journal lock used by edit/undo.
+    await resolveWorkspacePath(record.projectPath, record.path, { write: true });
+    const current = (await readBytes(record.projectPath, record.path))!;
+    decode(current);
+    if (current.length > MAX_CHECKPOINT_BYTES) throw new Error('新起点预览仅支持不超过 128KiB 的文本文件；较大文件请保留当前内容并新建会话。');
+    if (hash(current) !== expectedHash) throw new Error('文件在预览后已再次修改，未创建新起点；请取消后重新预览。');
+    if (expectedHash === record.afterHash) throw new Error('文件没有需要确认的外部修改，请刷新修改面板。');
+    const approved = current.toString('base64');
+    // Evidence and the new undo segment are one atomic commit. Never discard the
+    // old bytes first, and never rewrite immutable per-round tool evidence.
+    journal.checkpoints = [...(journal.checkpoints ?? []), { id: randomUUID(), approvedAt: new Date().toISOString(), previous: structuredClone(record), approved, approvedHash: expectedHash }];
+    record.before = approved;
+    record.after = approved;
+    record.afterHash = expectedHash;
+    await atomicJson(file, journal);
+    // The workspace itself is untouched. If an external editor races the commit,
+    // normal afterHash checks still reject the next edit/undo without losing data.
   });
 }

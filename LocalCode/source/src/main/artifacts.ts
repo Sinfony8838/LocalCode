@@ -2,11 +2,11 @@ import { clipboard, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { ArtifactPreviews, resolveArtifactPath } from '../core/artifacts';
-import type { ArtifactAction } from '../shared/artifacts';
+import type { ArtifactAction, ArtifactInputKind } from '../shared/artifacts';
 
 export class ArtifactController extends ArtifactPreviews {
-  async action(projectPath: string, input: string, action: ArtifactAction): Promise<void> {
-    const target = await resolveArtifactPath(projectPath, input);
+  async action(projectPath: string, input: string, action: ArtifactAction, inputKind: ArtifactInputKind = 'path'): Promise<void> {
+    const target = await resolveArtifactPath(projectPath, input, inputKind);
     switch (action) {
       case 'copy-path': clipboard.writeText(target.absolute); return;
       case 'reveal': shell.showItemInFolder(target.absolute); return;

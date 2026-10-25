@@ -3,9 +3,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, Theme } from '../shared/contracts';
+import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import { reduceAgentEvent } from '../shared/session-events';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
-import { beginRunChanges, finishRunChanges, recoverRunChanges } from '../core/run-changes';
+import { beginRunChanges, discardRunChanges, finishRunChanges, recoverRunChanges } from '../core/run-changes';
 
 interface Index { version: 1; projects: Project[]; sessions: SessionView[]; settings: AppSettings; keys: Record<string, string> }
 const local: ProviderConfig = { id: 'local', name: 'Ollama 本地模型', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'localcode-agent:latest', contextWindow: 8192, maxTokens: 1024, hasKey: false };
@@ -14,6 +15,7 @@ export class Store {
   private writes = Promise.resolve();
   private deltaTimer?: ReturnType<typeof setTimeout>;
   private backgroundError?: unknown;
+  private discardedRunSnapshots = new Set<string>();
   readonly indexFile: string;
   constructor(readonly dataDir: string) { this.indexFile = path.join(dataDir, 'index.json'); }
   async init() {
@@ -54,6 +56,11 @@ export class Store {
   persist() {
     clearTimeout(this.deltaTimer); this.deltaTimer = undefined;
     const snapshot = JSON.stringify(this.state, null, 2);
+    // Capture the same terminal rounds as the queued index, not later mutable state.
+    // This also retires pre-upgrade snapshots and recovered interrupted rounds on init.
+    const terminalRuns = this.state.sessions.flatMap(session => (session.runs ?? [])
+      .filter(run => run.status !== 'running')
+      .map(run => ({ sessionId: session.id, runId: run.runId })));
     const write = async () => {
       const tmp = this.indexFile + '.' + randomUUID() + '.tmp';
       await fs.writeFile(tmp, snapshot, { encoding: 'utf8', mode: 0o600 });
@@ -65,6 +72,14 @@ export class Store {
           if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 30) throw error;
           await new Promise(resolve => setTimeout(resolve, 50 + attempt * 10));
         }
+      }
+      for (const { sessionId, runId } of terminalRuns) {
+        const key = `${sessionId}/${runId}`;
+        if (this.discardedRunSnapshots.has(key)) continue;
+        try {
+          await discardRunChanges(this.dataDir, sessionId, runId);
+          this.discardedRunSnapshots.add(key);
+        } catch { /* Keep the durable summary; retry cleanup on the next write/startup. */ }
       }
     };
     this.writes = this.writes.then(write, write);
@@ -141,9 +156,13 @@ export class Store {
   async saveProvider(provider: ProviderConfig, encryptedKey?: string | null) {
     if (provider.kind === 'ollama' && provider.id !== 'local') throw new Error('Ollama 使用内置本地配置；其他服务请添加兼容 API。');
     if (provider.id === 'local') {
-      if (provider.kind !== 'ollama' || provider.baseUrl !== local.baseUrl || provider.model !== local.model) throw new Error('内置本地模型的地址和名称不可更改');
-      provider.contextWindow = this.provider('local').contextWindow;
-      provider.maxTokens = this.provider('local').maxTokens;
+      if (provider.kind !== 'ollama') throw new Error('内置本地配置必须使用 Ollama。');
+      provider = { ...provider, baseUrl: localOllamaUrl(provider.baseUrl) };
+      if (provider.ollamaMode !== 'existing' && provider.baseUrl !== MANAGED_OLLAMA_URL) throw new Error('请显式选择已有 Ollama 后再修改地址。');
+      if (!Number.isInteger(provider.contextWindow) || provider.contextWindow < 2048 || provider.contextWindow > 2097152 || !Number.isInteger(provider.maxTokens) || provider.maxTokens < 128 || provider.maxTokens > 131072 || provider.maxTokens + 1536 >= provider.contextWindow) throw new Error('本地模型上下文和输出预算无效。');
+      if (!provider.model.trim() || provider.model.length > 200) throw new Error('请填写已安装的本地模型名称。');
+      provider.model = provider.model.trim();
+      if (encryptedKey) throw new Error('本地 Ollama 不保存 API Key。');
       provider.enabled = true;
       delete provider.models;
     }

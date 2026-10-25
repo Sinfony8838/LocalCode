@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Code2, Copy, ExternalLink, FileCode2, FolderOpen, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, RefreshCw, X } from 'lucide-react';
-import type { ArtifactAction, ArtifactInfo } from '../shared/artifacts';
+import type { ArtifactAction, ArtifactInfo, ArtifactInputKind } from '../shared/artifacts';
 import type { FileView } from '../shared/contracts';
 
 type ViewMode = 'preview' | 'source';
@@ -28,12 +28,12 @@ export function useArtifactController({ projectId, onError, onOpen }: { projectI
   const menuRequest = useRef(0);
   const close = () => { request.current++; setArtifact(null); setSource(null); setLoading(false); setExpanded(false); };
   useEffect(() => { close(); menuRequest.current++; setMenu(null); }, [projectId]);
-  const open = async (filePath: string, desired: ViewMode = 'preview') => {
+  const open = async (filePath: string, desired: ViewMode = 'preview', inputKind: ArtifactInputKind = 'path') => {
     if (!projectId) return;
     const revision = ++request.current;
     setLoading(true); setArtifact(null); setSource(null); onOpen();
     try {
-      const info = await window.localcode.artifactInfo({ projectId, path: filePath });
+      const info = await window.localcode.artifactInfo({ projectId, path: filePath, inputKind });
       if (request.current !== revision) return;
       const nextMode = desired === 'source' || info.kind === 'text' ? 'source' : 'preview';
       let text: FileView | null = null;
@@ -51,7 +51,7 @@ export function useArtifactController({ projectId, onError, onOpen }: { projectI
     try { await window.localcode.openExternal(url); }
     catch (error) { onError(error); }
   };
-  const showMenu = async (event: React.MouseEvent | React.KeyboardEvent, path: string) => {
+  const showMenu = async (event: React.MouseEvent | React.KeyboardEvent, path: string, inputKind: ArtifactInputKind = 'path') => {
     event.preventDefault(); event.stopPropagation();
     const target = event.currentTarget as HTMLElement;
     const rect = target.getBoundingClientRect();
@@ -59,7 +59,7 @@ export function useArtifactController({ projectId, onError, onOpen }: { projectI
     const revision = ++menuRequest.current;
     setMenu({ path, ...position, trigger: target });
     try {
-      const info = await window.localcode.artifactInfo({ projectId, path });
+      const info = await window.localcode.artifactInfo({ projectId, path, inputKind });
       if (menuRequest.current === revision) setMenu({ path: info.path, ...position, info, trigger: target });
     } catch (error) { if (menuRequest.current === revision) setMenu({ path, ...position, error: error instanceof Error ? error.message : String(error), trigger: target }); }
   };
@@ -72,10 +72,10 @@ export function ExternalWebLink({ href, children }: { href: string; children: Re
   return <a className="markdown-link" href={href} target="_blank" rel="noopener noreferrer" onClick={event => { event.preventDefault(); void controller?.openExternal(href); }}>{children}</a>;
 }
 
-export function ArtifactLink({ path, children, className = '', label }: { path: string; children: React.ReactNode; className?: string; label?: string }) {
+export function ArtifactLink({ path, inputKind = 'path', children, className = '', label }: { path: string; inputKind?: ArtifactInputKind; children: React.ReactNode; className?: string; label?: string }) {
   const controller = useContext(ArtifactContext);
   if (!controller) return <span>{children}</span>;
-  return <a href={path} className={`artifact-link ${className}`} title={path} aria-label={label} onClick={event => { event.preventDefault(); void controller.open(path); }} onContextMenu={event => void controller.showMenu(event, path)} onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') void controller.showMenu(event, path); }}>{children}</a>;
+  return <a href={path} className={`artifact-link ${className}`} title={path} aria-label={label} onClick={event => { event.preventDefault(); void controller.open(path, 'preview', inputKind); }} onContextMenu={event => void controller.showMenu(event, path, inputKind)} onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') void controller.showMenu(event, path, inputKind); }}>{children}</a>;
 }
 
 export function ArtifactPanel({ controller: c }: { controller: ArtifactController }) {
