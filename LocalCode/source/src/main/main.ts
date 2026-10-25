@@ -307,7 +307,7 @@ async function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
   const width = Math.min(1200, Math.floor(workArea.width * .9));
   const height = Math.min(800, Math.floor(workArea.height * .9));
-  window = new BrowserWindow({ width, height, x: workArea.x + Math.floor((workArea.width - width) / 2), y: workArea.y + Math.floor((workArea.height - height) / 2), minWidth: Math.min(1050, width), minHeight: Math.min(700, height), fullscreen: false, title: 'LocalCode', backgroundColor: '#f9edf1', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
+  window = new BrowserWindow({ width, height, x: workArea.x + Math.floor((workArea.width - width) / 2), y: workArea.y + Math.floor((workArea.height - height) / 2), minWidth: Math.min(1050, width), minHeight: Math.min(700, height), fullscreen: false, title: 'LocalCode', icon: path.join(__dirname, 'renderer/branding/localcode.ico'), backgroundColor: '#f9edf1', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
   // Only explicit main-frame IPC opens browser links; preview popups never do.
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());

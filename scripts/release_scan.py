@@ -2,7 +2,7 @@
 import argparse
 import hashlib
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -10,6 +10,12 @@ import sys
 BLOCKED_DIRS = {'node_modules', 'dist', 'data', 'cache', 'logs', 'evidence', 'app', 'models', 'runtime', 'profile', 'temp', 'downloads', 'tools', '.aws', '.ssh', '.codex', '.agents', 'test-results', 'playwright-report'}
 ALLOWED_SUFFIXES = {'.md', '.py', '.ts', '.tsx', '.mjs', '.json', '.css', '.html', '.ps1', '.cmd', '.yml', '.yaml'}
 ALLOWED_NAMES = {'LICENSE', '.gitignore', '.gitattributes', '.npmrc'}
+# Only these reviewed branding bytes may bypass the file-type/NUL checks.
+# Directory, Git mode, size and credential rules still apply to every asset.
+ALLOWED_BINARY_ASSETS = {
+    'LocalCode/source/src/renderer/public/branding/localcode-logo.png': '5e0f8b5d2889191806db2f137f947c8d2d092c43d63098a6348ec0809eec5b2e',
+    'LocalCode/source/src/renderer/public/branding/localcode.ico': 'b0e41b7046c2b029e9f5d402c2ebf8ad3edf99fd6bb50526438ba852e91934b0',
+}
 PATTERNS = {
     'private-key': re.compile(rb'-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----'),
     'github-token': re.compile(rb'(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})'),
@@ -23,13 +29,14 @@ PATTERNS = {
 def inspect(name, mode, content, private_values=()):
     issues = []
     path = PurePosixPath(name)
+    approved_binary = ALLOWED_BINARY_ASSETS.get(name) == hashlib.sha256(content).hexdigest()
     if mode != '100644' and mode != '100755':
         issues.append('symlink-or-submodule')
     if any(p.lower() in BLOCKED_DIRS for p in path.parts):
         issues.append('runtime-or-private-directory')
-    if path.name.startswith('.env') or (path.suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES):
+    if path.name.startswith('.env') or (not approved_binary and path.suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES):
         issues.append('unapproved-file-type')
-    if len(content) > 2 * 1024 * 1024 or b'\x00' in content:
+    if len(content) > 2 * 1024 * 1024 or (not approved_binary and b'\x00' in content):
         issues.append('oversized-or-binary')
     for rule, pattern in PATTERNS.items():
         for match in pattern.finditer(content):
@@ -55,6 +62,18 @@ def self_test():
     assert inspect('src/test.ts', '100644', b'stored-ciphertext', [b'stored-ciphertext'])
     assert not inspect('src/test.ts', '100644', b'const apiKey = input.apiKey;')
     assert not inspect('tests/mock.ts', '100644', b'apiKey: "provider-fixture-secret-NOT-A-REAL-KEY"')
+    root = Path(__file__).resolve().parent.parent
+    for name, digest in ALLOWED_BINARY_ASSETS.items():
+        content = (root / name).read_bytes()
+        assert hashlib.sha256(content).hexdigest() == digest
+        assert not inspect(name, '100644', content)
+        assert 'unapproved-file-type' in inspect(name, '100644', content + b'changed')
+        assert 'oversized-or-binary' in inspect(name, '100644', content + b'changed')
+        assert 'unapproved-file-type' in inspect('src/' + PurePosixPath(name).name, '100644', content)
+        assert 'symlink-or-submodule' in inspect(name, '120000', content)
+        assert 'runtime-or-private-directory' in inspect('LocalCode/data/' + PurePosixPath(name).name, '100644', content)
+        assert 'matches-private-credential-or-ciphertext' in inspect(name, '100644', content, [content[:32]])
+        assert 'oversized-or-binary' in inspect(name, '100644', content + b'\x00' * (2 * 1024 * 1024))
     print('Scanner self-test: PASS (positive and negative controls)')
 
 def main():

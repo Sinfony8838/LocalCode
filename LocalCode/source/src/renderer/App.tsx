@@ -1,3 +1,4 @@
+import BrandLogo from './BrandLogo';
 import { t, useLocale, setLocale, errorText } from './i18n';
 import { APP_LOCALES, LOCALE_NAMES, type AppLocale } from '../shared/i18n';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -21,7 +22,7 @@ import {
   FolderOpen, FolderPlus, GitCompareArrows, History, LoaderCircle, MessageSquare,
   Monitor, Moon, MoreHorizontal, PanelRightClose, PanelRightOpen, Plus, RefreshCw,
   Search, Send, Settings2, ShieldCheck, Sparkles, Square, Sun, Terminal, Trash2,
-  Home, PanelLeftClose, PanelLeftOpen, SquarePen,
+  PanelLeftClose, PanelLeftOpen, SquarePen, UserRound, Info, Home,
   Undo2, X, Brain, Languages,
 } from 'lucide-react';
 import type {
@@ -58,6 +59,13 @@ export default function App() {
   const [providerId, setProviderId] = useState('');
   const [modelId, setModelId] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsEntryTab>('models');
+  const settingsOpener = useRef<HTMLElement | null>(null);
+  const openSettings = useCallback((tab: SettingsEntryTab = 'models', opener?: HTMLElement | null) => {
+    settingsOpener.current = opener || (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setSettingsInitialTab(tab);
+    setSettingsOpen(true);
+  }, []);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<'files' | 'changes'>('changes');
@@ -222,7 +230,7 @@ export default function App() {
   }, [draft, boot?.settings.fontSize]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === ',') { event.preventDefault(); setSettingsOpen(true); }
+      if ((event.ctrlKey || event.metaKey) && event.key === ',') { event.preventDefault(); openSettings(); }
       if (event.key === 'Escape') { setSettingsOpen(false); setRenameId(''); }
     };
     window.addEventListener('keydown', handler);
@@ -396,22 +404,22 @@ export default function App() {
     catch (failure) { setError(errorText(failure)); }
   };
 
-  if (!connected) return <div className="bridge-empty"><div className="brand-mark"><Code2 size={28} /></div><h1>LocalCode</h1><p>{t("请通过 LocalCode 桌面程序打开此页面。")}</p><span>{t("本地工具只通过桌面应用的受控接口提供。")}</span></div>;
-  if (loading) return <div className="bridge-empty"><div className="brand-mark"><Code2 size={28} /></div><h1>LocalCode</h1><p><LoaderCircle className="spin" size={16} />{t(" 正在打开你的工作区…")}</p></div>;
+  if (!connected) return <div className="bridge-empty"><div className="brand-mark"><BrandLogo /></div><h1>LocalCode</h1><p>{t("请通过 LocalCode 桌面程序打开此页面。")}</p><span>{t("本地工具只通过桌面应用的受控接口提供。")}</span></div>;
+  if (loading) return <div className="bridge-empty"><div className="brand-mark"><BrandLogo /></div><h1>LocalCode</h1><p><LoaderCircle className="spin" size={16} />{t(" 正在打开你的工作区…")}</p></div>;
 
   return <ArtifactContext.Provider value={artifacts}><div className={`app-shell ${inspectorOpen || artifactOpen ? '' : 'inspector-hidden'} ${sidebarOpen ? '' : 'sidebar-hidden'} ${artifactOpen ? 'artifact-open' : ''}`}>
     <nav className="activity-rail" aria-label={t("工作区导航")}>
-      <button className={`rail-button ${!activeSessionId ? 'active' : ''}`} title={t("返回首页")} aria-label={t("返回首页")} aria-current={!activeSessionId ? 'page' : undefined} onClick={goHome}><Home size={19} /></button>
+      <button className={`rail-button ${!activeSessionId ? 'active' : ''}`} title={t("返回首页")} aria-label={t("返回首页")} aria-current={!activeSessionId ? 'page' : undefined} onClick={goHome}><HomeIcon active={!activeSessionId} /></button>
       <button className="rail-button" title={sidebarOpen ? t('收起侧边栏') : t('展开侧边栏')} aria-label={sidebarOpen ? t('收起侧边栏') : t('展开侧边栏')} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
       <button className="rail-button" title={t("打开项目文件夹")} aria-label={t("添加项目")} onClick={() => void openProject()}><FolderOpen size={19} /></button>
       <div className="rail-divider" />
       <button className={`rail-button ${inspectorOpen ? 'active' : ''}`} title={t("文件与修改")} aria-label={t("切换文件与修改面板")} aria-pressed={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}><GitCompareArrows size={19} /></button>
       <div className="rail-spacer" />
-      <button className="rail-button" title={t("设置")} aria-label={t("应用设置")} onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button>
-      <span className="local-avatar" title={t("LocalCode · 本地工作区")}>LC</span>
+      <button className="rail-button" title={t("设置")} aria-label={t("应用设置")} onClick={() => openSettings()}><Settings2 size={18} /></button>
+      <UserMenu onOpenSettings={openSettings} labels={{ menu: t('用户菜单'), user: t('本地用户'), description: t('此设备上的工作区'), settings: t('设置'), pets: t('桌宠'), about: t('关于 LocalCode') }} />
     </nav>
     <aside className="sidebar">
-      <div className="sidebar-brand drag-region"><span>LocalCode</span><ChevronDown size={13} /><button className="icon-button" title={t("打开项目文件夹")} aria-label={t("打开项目文件夹")} onClick={() => void openProject()}><FolderPlus size={16} /></button></div>
+      <div className="sidebar-brand drag-region"><BrandLogo /><span>LocalCode</span><ChevronDown size={13} /><button className="icon-button" title={t("打开项目文件夹")} aria-label={t("打开项目文件夹")} onClick={() => void openProject()}><FolderPlus size={16} /></button></div>
       <div className="sidebar-actions"><button className="new-task-button" onClick={() => void newSession()}><SquarePen size={15} /><span>{t("新建任务")}</span></button></div>
       <TaskSidebar projects={boot?.projects || []} sessions={sessions} activeProjectId={activeProjectId} activeSessionId={activeSessionId} preferences={sidebarPreferences} onProject={selectProject} onSession={session => void openSession(session)} onAddProject={() => void openProject()} onRename={session => { setRenameId(session.id); setRenameTitle(session.title); }} onMove={session => setMoveSessionId(session.id)} onPin={project => void togglePinned(project)} onPreferences={patch => void updateSidebar(patch)} />
       {busySession && busySession.id !== activeSessionId && <button className="background-task" onClick={() => void openSession(busySession)}><LoaderCircle size={14} className="spin" /><span>{busySession.status === 'awaiting_approval' ? t('有任务等待确认') : t('有任务正在运行')}</span><ArrowUpRight size={13} /></button>}
@@ -425,7 +433,7 @@ export default function App() {
         <div className="workspace-heading"><Folder size={16} /><h1 title={activeSession?.title || project?.path}>{activeSession ? sessionTitle(activeSession) : t('首页')}</h1></div>
         <div className="header-actions no-drag"><span className={`run-status ${activeSession?.status || 'idle'}`}><span className="status-dot" />{t(STATUS_LABELS[activeSession?.status || 'idle'])}</span><button className="icon-button" title={inspectorOpen ? t('收起文件面板') : t('打开文件面板')} aria-label={inspectorOpen ? t('收起文件面板') : t('打开文件面板')} onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button></div>
       </header>
-      {needsModelSetup && <section className="model-setup-banner" aria-label={t("模型配置指引")}><div><strong>{cloudSelected ? t("还差一步：配置 API Key") : t("开始前，选择一种模型方式")}</strong><p>{cloudSelected ? t("在模型设置中保存密钥，然后选择云端模型。无需安装 Ollama 或下载本地模型。") : cloudConfigured ? t("本地模型尚未就绪。你也可以直接在输入框下方选择已配置的云端模型，不受本地环境影响。") : t("本地新安装：运行 Install-LocalModel.cmd（便携版）或 Setup.cmd（源码版）。已有 Ollama：在设置中选择已有服务。云端 API：只需地址、模型名和密钥。")}</p></div><button className="secondary-button" onClick={() => setSettingsOpen(true)}><Settings2 size={15} />{t("配置模型与检查环境")}</button></section>}
+      {needsModelSetup && <section className="model-setup-banner" aria-label={t("模型配置指引")}><div><strong>{cloudSelected ? t("还差一步：配置 API Key") : t("开始前，选择一种模型方式")}</strong><p>{cloudSelected ? t("在模型设置中保存密钥，然后选择云端模型。无需安装 Ollama 或下载本地模型。") : cloudConfigured ? t("本地模型尚未就绪。你也可以直接在输入框下方选择已配置的云端模型，不受本地环境影响。") : t("本地新安装：运行 Install-LocalModel.cmd（便携版）或 Setup.cmd（源码版）。已有 Ollama：在设置中选择已有服务。云端 API：只需地址、模型名和密钥。")}</p></div><button className="secondary-button" onClick={() => openSettings()}><Settings2 size={15} />{t("配置模型与检查环境")}</button></section>}
       <div className="conversation" ref={scrollRef} onScroll={event => { const element = event.currentTarget; setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 100); }}>
         {(!activeSession || !activeSession.messages.length) ? <div className="welcome">
           <h2>{project ? t('你想在 {name} 中做些什么？', { name: project.name }) : t('我们从哪里开始？')}</h2>
@@ -480,7 +488,7 @@ export default function App() {
     </aside>}
 
     {error && <div className="toast error-toast" role="alert"><AlertCircle size={18} /><div><strong>{t("操作未完成")}</strong><p>{t(error)}</p></div><button className="icon-button" title={t("关闭错误提示")} aria-label={t("关闭错误提示")} onClick={() => setError('')}><X size={15} /></button></div>}
-    {settingsOpen && boot && <SettingsDialog settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onLocale={changeLocale} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
+    {settingsOpen && boot && <SettingsDialog initialTab={settingsInitialTab} returnFocusTo={settingsOpener.current} settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onLocale={changeLocale} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
     {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} returnFocusTo={checkpointOpener.current} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>{t("重命名会话")}</h2><label className="field"><span>{t("会话名称")}</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>{t("取消")}</button><button className="primary-button" disabled={!renameTitle.trim()}>{t("保存")}</button></div></form></div>}
     {moveSessionId && sessions.find(session => session.id === moveSessionId) && <MoveTaskDialog session={sessions.find(session => session.id === moveSessionId)!} projects={boot?.projects || []} onClose={() => setMoveSessionId('')} onMove={projectId => moveTask(moveSessionId, projectId)} onCreate={() => openProject(moveSessionId)} />}
@@ -519,7 +527,7 @@ function MessageCopy({ message }: { message: ChatMessage }) {
 function Message({ message }: { message: ChatMessage }) {
   if (message.role === 'user') return <div className="user-message"><div>{message.text}</div></div>;
   if (!message.text && !message.parts?.length) return null;
-  return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><Code2 size={15} /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}</div></article>;
+  return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><BrandLogo /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}</div></article>;
 }
 
 function MarkdownText({ text }: { text: string }) {
@@ -591,19 +599,86 @@ function DiffContent({ change }: { change: ChangeView }) {
   return <><div className="diff-stats"><span className="added">+{added}</span><span className="removed">−{removed}</span><span>{change.created ? t("新增文件") : t("与首次修改前比较")}</span></div><div className="diff-content" aria-label={t("{path} 的文件差异", { path: change.path })}>{rows.length ? rows.map((row, index) => <div key={index} className={`diff-row ${row.kind}`}><span className="line-number">{row.old}</span><span className="line-number">{row.next}</span><span className="diff-sign">{row.kind === 'added' ? '+' : row.kind === 'removed' ? '−' : ' '}</span><code>{row.text || ' '}</code></div>) : <div className="diff-empty">{t("没有文本差异")}</div>}</div></>;
 }
 
-function SettingsDialog({ settings, health, version, onClose, onTheme, onLocale, onFontSize, onHealth, healthPending, onSaved, onOpenData }: {
+type SettingsEntryTab = 'models' | 'pets' | 'about';
+
+function HomeIcon({ active }: { active: boolean }) {
+  if (!active) return <Home className="home-icon" size={20} aria-hidden="true" />;
+  return <svg className="home-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" clipRule="evenodd" d="M12 2.5 2.75 10v1.75H5v9h14v-9h2.25V10L12 2.5ZM10 14h4v6.75h-4V14Z" /></svg>;
+}
+
+function UserMenu({ onOpenSettings, labels }: {
+  onOpenSettings: (tab: SettingsEntryTab, opener?: HTMLElement | null) => void;
+  labels: { menu: string; user: string; description: string; settings: string; pets: string; about: string };
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const firstFocus = useRef(0);
+  const close = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) trigger.current?.focus();
+  };
+  useEffect(() => {
+    if (!open) return;
+    const items = menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    items?.[firstFocus.current < 0 ? items.length - 1 : 0]?.focus();
+    const outside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) {
+        if (menu.current?.contains(document.activeElement)) trigger.current?.focus();
+        setOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  const entries = [
+    { tab: 'models' as const, label: labels.settings, Icon: Settings2 },
+    { tab: 'pets' as const, label: labels.pets, Icon: Sparkles },
+    { tab: 'about' as const, label: labels.about, Icon: Info },
+  ];
+  return <div className="user-menu-anchor" ref={root} onBlur={event => {
+    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+  }}>
+    <button ref={trigger} type="button" className={`rail-button user-menu-trigger ${open ? 'active' : ''}`} title={labels.menu} aria-label={labels.menu} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? 'local-user-menu' : undefined} onClick={() => { firstFocus.current = 0; setOpen(value => !value); }} onKeyDown={event => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); firstFocus.current = event.key === 'ArrowUp' ? -1 : 0; setOpen(true); }
+    }}><UserRound size={19} /></button>
+    {open && <div className="user-menu-popover" ref={menu} id="local-user-menu" role="menu" aria-label={labels.menu} onKeyDown={event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); return; }
+      if (event.key === 'Tab') { close(true); return; }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    }}>
+      <div className="user-menu-heading" role="presentation"><span className="user-menu-avatar"><UserRound size={20} /></span><div><strong>{labels.user}</strong><p>{labels.description}</p></div></div>
+      <div className="user-menu-divider" role="separator" />
+      {entries.map(({ tab, label, Icon }) => <button key={tab} type="button" role="menuitem" tabIndex={-1} onClick={() => { setOpen(false); onOpenSettings(tab, trigger.current); }}><Icon size={16} /><span>{label}</span></button>)}
+    </div>}
+  </div>;
+}
+
+function SettingsDialog({ initialTab, returnFocusTo, settings, health, version, onClose, onTheme, onLocale, onFontSize, onHealth, healthPending, onSaved, onOpenData }: {
+  initialTab: SettingsEntryTab; returnFocusTo: HTMLElement | null;
   settings: AppSettings; health: ModelHealth; version: string; onClose: () => void; onTheme: (theme: Theme) => Promise<void>;
   onFontSize: (fontSize: number) => Promise<void>;
   onLocale: (locale: AppLocale) => Promise<void>;
   onHealth: () => Promise<void>; healthPending: boolean; onSaved: () => Promise<unknown>; onOpenData: () => void;
 }) {
-  const [tab, setTab] = useState<'models' | 'language' | 'appearance' | 'pets' | 'about'>('models');
-  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section className={`settings-dialog ${tab === 'models' ? 'model-settings-dialog' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><h2 id="settings-title">{t("设置")}</h2><button className="icon-button" aria-label={t("关闭设置")} onClick={onClose}><X size={19} /></button></header><div className="settings-layout"><nav className="settings-nav"><button className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Cpu size={16} />{t("模型设置")}</button><button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={16} />{t('语言')}</button><button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}><Monitor size={16} />{t("外观")}</button><button className={tab === 'pets' ? 'active' : ''} onClick={() => setTab('pets')}><Sparkles size={16} />{t("桌宠")}</button><button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}><Code2 size={16} />{t("关于")}</button></nav><div className="settings-content">
+  const [tab, setTab] = useState<'models' | 'language' | 'appearance' | 'pets' | 'about'>(initialTab);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeButton.current?.focus();
+    return () => { if (returnFocusTo?.isConnected) returnFocusTo.focus(); };
+  }, [returnFocusTo]);
+  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section className={`settings-dialog ${tab === 'models' ? 'model-settings-dialog' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><h2 id="settings-title">{t("设置")}</h2><button ref={closeButton} className="icon-button" aria-label={t("关闭设置")} onClick={onClose}><X size={19} /></button></header><div className="settings-layout"><nav className="settings-nav"><button className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Cpu size={16} />{t("模型设置")}</button><button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={16} />{t('语言')}</button><button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}><Monitor size={16} />{t("外观")}</button><button className={tab === 'pets' ? 'active' : ''} onClick={() => setTab('pets')}><Sparkles size={16} />{t("桌宠")}</button><button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}><BrandLogo />{t("关于")}</button></nav><div className="settings-content">
       {tab === 'language' && <LanguageControl value={settings.locale} onChange={onLocale} />}
       {tab === 'pets' && <PetControls />}
       {tab === 'models' && <ModelSettings settings={settings} health={health} onHealth={onHealth} healthPending={healthPending} onSaved={onSaved} />}
       {tab === 'appearance' && <><div className="settings-section-heading"><h3>{t("外观")}</h3><p>{t("为你的工作区选择舒适的配色与字号。")}</p></div><FontSizeControl value={settings.fontSize} onChange={onFontSize} /><div className="theme-options">{(['light', 'dark'] as const).map(theme => <button key={theme} className={`theme-option ${settings.theme === theme ? 'selected' : ''}`} onClick={() => void onTheme(theme)}><div className={`theme-preview ${theme}`}><i /><div><b /><span /><span /><em /></div><i /></div><span>{theme === 'light' ? <Sun size={15} /> : <Moon size={15} />}{theme === 'light' ? t("浅色") : t("深色")}{settings.theme === theme && <Check size={14} />}</span></button>)}</div></>}
-      {tab === 'about' && <><div className="about-brand"><div className="brand-mark"><Code2 size={30} /></div><h3>LocalCode</h3><p>{t("让想法，在本地落地。")}</p><span>{t("版本 ")}{version || '0.1.0'}</span></div><div className="about-details"><div><span>{t("Agent 运行时")}</span><strong>pi SDK 1.4.0</strong></div><div><span>{t("默认运行方式")}</span><strong>{t("每个会话独立 Agent")}</strong></div><div><span>{t("文件权限")}</span><strong>{t("所选项目内自动修改")}</strong></div><div><span>{t("终端权限")}</span><strong>{t("每条命令单独确认")}</strong></div></div><p className="about-disclaimer">{t("终端命令以当前 Windows 用户权限运行。应用的项目范围校验不等于操作系统沙箱。")}</p><button className="secondary-button data-folder-button" onClick={onOpenData}><FolderOpen size={15} />{t("打开应用数据目录")}</button></>}
+      {tab === 'about' && <><div className="about-brand"><div className="brand-mark"><BrandLogo /></div><h3>LocalCode</h3><p>{t("让想法，在本地落地。")}</p><span>{t("版本 ")}{version || '0.1.0'}</span></div><div className="about-details"><div><span>{t("Agent 运行时")}</span><strong>pi SDK 1.4.0</strong></div><div><span>{t("默认运行方式")}</span><strong>{t("每个会话独立 Agent")}</strong></div><div><span>{t("文件权限")}</span><strong>{t("所选项目内自动修改")}</strong></div><div><span>{t("终端权限")}</span><strong>{t("每条命令单独确认")}</strong></div></div><p className="about-disclaimer">{t("终端命令以当前 Windows 用户权限运行。应用的项目范围校验不等于操作系统沙箱。")}</p><button className="secondary-button data-folder-button" onClick={onOpenData}><FolderOpen size={15} />{t("打开应用数据目录")}</button></>}
     </div></div></section></div>;
 }
 

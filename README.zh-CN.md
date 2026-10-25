@@ -1,3 +1,5 @@
+<p align="center"><img src="LocalCode/source/src/renderer/public/branding/localcode-logo.png" alt="LocalCode" width="120" /></p>
+
 # LocalCode
 
 [English](README.md) | **简体中文**
@@ -195,3 +197,5 @@ python scripts\release_scan.py
 检查器扫描实际暂存 blob，阻止运行数据及多种密钥格式，但不能保证发现所有秘密。CI 重复检查，维护者仍需进行代码、许可及依赖审查。`data`、`cache`、`logs`、`evidence`、`app`、`models`、`runtime`、`profile`、`downloads`、`temp`、`tools` 等均不发布。
 
 源码采用 [MIT](LICENSE)，依赖和模型遵循各自许可证。运行时与模型从上游下载，不随仓库再分发，详见[第三方说明](THIRD_PARTY_NOTICES.md)。程序未购买 Windows 代码签名证书，系统可能显示信誉提示。
+
+项目 Logo 保存在 `LocalCode/source/src/renderer/public/branding/`，PNG 保留原图，`localcode.ico` 包含 16–256 px 的 Windows 图标。可在 Windows 执行 `powershell -NoProfile -File LocalCode/source/scripts/generate-icons.ps1` 重新生成 ICO。更换素材后，应审查并更新 `scripts/release_scan.py` 中对应文件的精确哈希。
