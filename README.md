@@ -59,6 +59,14 @@ The desktop always targets `localcode-agent`; setup points that alias to your se
 
 Windows and GPU requirements are based on [Ollama's Windows documentation](https://docs.ollama.com/windows) and [hardware support](https://docs.ollama.com/gpu). The pinned portable runtime contains NVIDIA dependencies; AMD/Intel support requires separate upstream setup. See the [default model page](https://ollama.com/library/qwen3.5:9b-q4_K_M) for current model size and license. Registry tags can change; setup records the installed alias and the verification script reports its digest.
 
+## Turn summaries and file previews (0.1.13)
+
+- Each completed task turn keeps its own elapsed time and file-change summary. Intermediate replies remain copyable without marking the turn complete; stopped or failed turns keep their actual status. Repeated writes to one file are counted once, and edits restored to their starting content are omitted.
+- Click a generated file link to view HTML, images, or text inside the agent. Right-click file links, tool file entries, or changed files to preview, inspect source, open with the default or another Windows app, reveal in Explorer, or copy the full path. PDFs and other documents use external applications.
+- HTML previews run interactive local scripts with project-relative assets in an isolated frame. Network requests and access to the agent are blocked. File statistics use bounded project snapshots, so coverage limits and concurrent external edits are shown explicitly.
+
+See [turn summaries and previews](docs/TURN_SUMMARIES_AND_PREVIEWS.md) for usage, scope, and validation commands.
+
 ## Architecture
 
 ```mermaid

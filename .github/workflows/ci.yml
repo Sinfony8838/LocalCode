@@ -35,5 +35,8 @@ jobs:
         working-directory: LocalCode/source
       - run: npm run build
         working-directory: LocalCode/source
+      - name: Verify turn summaries and embedded artifacts in Electron
+        run: node scripts/acceptance-artifacts.mjs
+        working-directory: LocalCode/source
       - run: npm audit --omit=dev --audit-level=high
         working-directory: LocalCode/source

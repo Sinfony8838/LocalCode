@@ -6,6 +6,8 @@ import { diffLines } from 'diff';
 import PetControls from './PetControls';
 import ModelSettings from './ModelSettings';
 import ModelPicker from './ModelPicker';
+import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
+import RunSummary from './RunSummary';
 import { reduceAgentEvent } from '../shared/session-events';
 import { providerModels } from '../shared/providers';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
@@ -19,7 +21,7 @@ import {
   Undo2, X, Brain,
 } from 'lucide-react';
 import type {
-  MessagePart, RunProgress, AgentEvent, AppSettings, Bootstrap, ChangeView, ChatMessage, FileEntry, FileView,
+  MessagePart, RunProgress, AgentEvent, AppSettings, Bootstrap, ChangeView, ChatMessage, FileEntry, FileView, RunSummary as RunSummaryRecord,
   ModelHealth, Project, ProviderConfig, RunStatus, SessionView, Theme, ToolRecord,
 } from '../shared/contracts';
 
@@ -55,6 +57,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<'files' | 'changes'>('changes');
   const [files, setFiles] = useState<FileEntry[]>([]);
+  const [filesRevision, setFilesRevision] = useState(0);
   const [directory, setDirectory] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
   const [fileView, setFileView] = useState<FileView | null>(null);
@@ -76,6 +79,8 @@ export default function App() {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const changesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connected = Boolean(window.localcode);
+  const artifacts = useArtifactController({ projectId: activeProjectId, onError: failure => setError(errorText(failure)), onOpen: () => { setInspectorOpen(false); setSidebarOpen(false); } });
+  const artifactOpen = Boolean(artifacts.artifact || artifacts.loading);
 
   activeSessionRef.current = activeSessionId;
   activeProjectRef.current = activeProjectId;
@@ -148,6 +153,7 @@ export default function App() {
       setBoot(previous => previous ? { ...previous, sessions: previous.sessions.map(session => reduceAgentEvent(session, event)) } : previous);
       if (event.type === 'notice' && event.sessionId === activeSessionRef.current) setNotice(event.message);
       if (event.type === 'changes_updated' || event.type === 'settled') {
+        if (event.sessionId === activeSessionRef.current) setFilesRevision(value => value + 1);
         if (changesTimer.current) clearTimeout(changesTimer.current);
         changesTimer.current = setTimeout(() => void refreshChanges(), 120);
       }
@@ -171,11 +177,12 @@ export default function App() {
     window.localcode.listFiles({ projectId: activeProjectId, directory }).then(entries => !disposed && setFiles(entries))
       .catch(failure => !disposed && setError(errorText(failure))).finally(() => !disposed && setFileLoading(false));
     return () => { disposed = true; };
-  }, [activeProjectId, directory]);
+  }, [activeProjectId, directory, filesRevision]);
+  useEffect(() => { if (inspectorOpen) artifacts.close(); }, [inspectorOpen]);
   useEffect(() => { setChanges([]); setChangePath(''); setNotice(''); void refreshChanges(activeSessionId); }, [activeSessionId, refreshChanges]);
   useEffect(() => {
     if (atBottom && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [activeSession?.messages, activeSession?.tools, activeSession?.approval, atBottom]);
+  }, [activeSession?.messages, activeSession?.tools, activeSession?.approval, activeSession?.runs, atBottom]);
   useEffect(() => {
     setAtBottom(true);
     requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; });
@@ -294,14 +301,7 @@ export default function App() {
   };
   const openFile = async (entry: FileEntry) => {
     if (entry.directory) { setDirectory(entry.path); return; }
-    const projectId = activeProjectId;
-    try {
-      setFileLoading(true);
-      const result = await window.localcode.readFile({ projectId, path: entry.path });
-      if (activeProjectRef.current === projectId) setFileView(result);
-    }
-    catch (failure) { setError(errorText(failure)); }
-    finally { if (activeProjectRef.current === projectId) setFileLoading(false); }
+    await artifacts.open(entry.path);
   };
   const undo = async (change: ChangeView) => {
     if (!activeSession || busy || change.conflict) return;
@@ -317,7 +317,7 @@ export default function App() {
   if (!connected) return <div className="bridge-empty"><div className="brand-mark"><Code2 size={28} /></div><h1>LocalCode</h1><p>请通过 LocalCode 桌面程序打开此页面。</p><span>本地工具只通过桌面应用的受控接口提供。</span></div>;
   if (loading) return <div className="bridge-empty"><div className="brand-mark"><Code2 size={28} /></div><h1>LocalCode</h1><p><LoaderCircle className="spin" size={16} /> 正在打开你的工作区…</p></div>;
 
-  return <div className={`app-shell ${inspectorOpen ? '' : 'inspector-hidden'} ${sidebarOpen ? '' : 'sidebar-hidden'}`}>
+  return <ArtifactContext.Provider value={artifacts}><div className={`app-shell ${inspectorOpen || artifactOpen ? '' : 'inspector-hidden'} ${sidebarOpen ? '' : 'sidebar-hidden'} ${artifactOpen ? 'artifact-open' : ''}`}>
     <nav className="activity-rail" aria-label="工作区导航">
       <button className="rail-button active" title="新建任务" aria-label="开始新任务" onClick={() => void newSession()}><Home size={19} /></button>
       <button className="rail-button" title={sidebarOpen ? '收起侧边栏' : '展开侧边栏'} aria-label={sidebarOpen ? '收起侧边栏' : '展开侧边栏'} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
@@ -375,11 +375,9 @@ export default function App() {
             </div>
           </>}
         </div> : <div className="message-list">
-          <ConversationTimeline messages={activeSession.messages} tools={activeSession.tools} />
+          <ConversationTimeline messages={activeSession.messages} tools={activeSession.tools} runs={activeSession.runs || []} />
           {busy && !activeSession.approval && <ProgressIndicator progress={activeSession.progress} />}
           {activeSession.error && <div className="inline-error"><AlertCircle size={16} /><div><strong>任务遇到问题</strong><p>{activeSession.error}</p></div></div>}
-          {activeSession.status === 'interrupted' && <div className="end-note"><Square size={12} />任务已停止。已完成的文件修改仍保留，可在右侧查看。</div>}
-          {activeSession.status === 'completed' && <div className="end-note"><Check size={13} />本轮已完成{changes.length > 0 ? ` · ${changes.length} 个文件有修改` : ''}</div>}
         </div>}
       </div>
       {!atBottom && <button className="scroll-bottom icon-button" title="回到最新消息" aria-label="回到最新消息" onClick={() => { setAtBottom(true); if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}><ArrowDown size={17} /></button>}
@@ -399,17 +397,17 @@ export default function App() {
       </div>
     </main>
 
-    {inspectorOpen && <aside className="inspector">
+    {inspectorOpen && !artifactOpen && <aside className="inspector">
       <div className="inspector-tabs"><button className={inspectorTab === 'changes' ? 'active' : ''} onClick={() => setInspectorTab('changes')}><GitCompareArrows size={15} />修改{changes.length > 0 && <span className="count-badge">{changes.length}</span>}</button><button className={inspectorTab === 'files' ? 'active' : ''} onClick={() => setInspectorTab('files')}><Files size={15} />文件</button></div>
       {inspectorTab === 'changes' ? <>
         <div className="inspector-section-label"><span>本次会话</span><button className="icon-button" title="刷新文件差异" aria-label="刷新文件差异" onClick={() => void refreshChanges()}><RefreshCw size={13} /></button></div>
         {!changes.length ? <div className="panel-empty"><div className="panel-empty-icon"><GitCompareArrows size={27} strokeWidth={1.4} /></div><h3>修改会显示在这里</h3><p>Agent 编辑文件后，你可以查看差异，并撤销本次会话的修改。</p><span className="panel-footnote">不会自动提交到 Git</span></div> : <>
-          <div className="change-files">{changes.map(change => <button key={change.path} className={`change-file ${selectedChange?.path === change.path ? 'active' : ''}`} onClick={() => setChangePath(change.path)} title={change.path}>{change.created ? <FilePlus2 size={14} /> : <FileCode2 size={14} />}<span>{change.path}</span>{change.conflict ? <AlertCircle size={13} className="warning-text" /> : <span className={change.created ? 'change-mark added' : 'change-mark'}>{change.created ? 'A' : 'M'}</span>}</button>)}</div>
+          <div className="change-files">{changes.map(change => <button key={change.path} className={`change-file ${selectedChange?.path === change.path ? 'active' : ''}`} onClick={() => setChangePath(change.path)} onContextMenu={event => void artifacts.showMenu(event, change.path)} title={change.path}>{change.created ? <FilePlus2 size={14} /> : <FileCode2 size={14} />}<span>{change.path}</span>{change.conflict ? <AlertCircle size={13} className="warning-text" /> : <span className={change.created ? 'change-mark added' : 'change-mark'}>{change.created ? 'A' : 'M'}</span>}</button>)}</div>
           {selectedChange && <div className="diff-pane"><div className="diff-title"><span title={selectedChange.path}>{shortPath(selectedChange.path)}</span><button className="icon-button" aria-label="撤销此文件修改" title={selectedChange.conflict ? '文件有其他修改，不能直接撤销' : busy ? '任务结束后可撤销' : '撤销本会话对此文件的修改'} disabled={busy || selectedChange.conflict} onClick={() => void undo(selectedChange)}><Undo2 size={14} /></button></div>{selectedChange.conflict && <div className="conflict-note"><AlertCircle size={13} />文件已有其他修改，已保护当前内容，无法直接撤销。</div>}<DiffContent change={selectedChange} /></div>}
         </>}
       </> : <>
         <div className="file-breadcrumb"><button className="icon-button" disabled={!directory && !fileView} aria-label="返回上级目录" title="返回目录" onClick={() => { if (fileView) setFileView(null); else setDirectory(directory.replace(/\\/g, '/').split('/').slice(0, -1).join('/')); }}><ArrowLeft size={14} /></button><span title={fileView?.path || directory || project?.path}>{fileView?.path || directory || project?.name || '项目文件'}</span></div>
-        {fileLoading ? <div className="panel-loading"><LoaderCircle size={19} className="spin" /><span>正在读取…</span></div> : fileView ? <><div className="file-readonly"><FileCode2 size={12} />只读预览{fileView.truncated && <span>· 内容已截断</span>}</div><pre className="file-code">{fileView.content}</pre></> : <div className="file-list">{files.map(entry => <button key={entry.path} className="file-entry" onClick={() => void openFile(entry)} title={entry.path}>{entry.directory ? <Folder size={15} className="folder-icon" /> : <FileCode2 size={15} />}<span>{entry.name}</span>{entry.directory && <ChevronRight size={12} />}</button>)}{!files.length && <div className="panel-empty compact"><FolderOpen size={25} strokeWidth={1.4} /><p>{project ? '此目录没有可显示的文件。' : '选择项目后浏览文件。'}</p></div>}</div>}
+        {fileLoading ? <div className="panel-loading"><LoaderCircle size={19} className="spin" /><span>正在读取…</span></div> : fileView ? <><div className="file-readonly"><FileCode2 size={12} />只读预览{fileView.truncated && <span>· 内容已截断</span>}</div><pre className="file-code">{fileView.content}</pre></> : <div className="file-list">{files.map(entry => <button key={entry.path} className="file-entry" onClick={() => void openFile(entry)} onContextMenu={event => { if (!entry.directory) void artifacts.showMenu(event, entry.path); }} onKeyDown={event => { if (!entry.directory && (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) void artifacts.showMenu(event, entry.path); }} title={entry.path}>{entry.directory ? <Folder size={15} className="folder-icon" /> : <FileCode2 size={15} />}<span>{entry.name}</span>{entry.directory && <ChevronRight size={12} />}</button>)}{!files.length && <div className="panel-empty compact"><FolderOpen size={25} strokeWidth={1.4} /><p>{project ? '此目录没有可显示的文件。' : '选择项目后浏览文件。'}</p></div>}</div>}
       </>}
       <div className="inspector-bottom"><ShieldCheck size={12} /><span>工作范围：所选项目文件夹</span></div>
     </aside>}
@@ -417,17 +415,20 @@ export default function App() {
     {error && <div className="toast error-toast" role="alert"><AlertCircle size={18} /><div><strong>操作未完成</strong><p>{error}</p></div><button className="icon-button" title="关闭错误提示" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15} /></button></div>}
     {settingsOpen && boot && <SettingsDialog settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>重命名会话</h2><label className="field"><span>会话名称</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>取消</button><button className="primary-button" disabled={!renameTitle.trim()}>保存</button></div></form></div>}
-  </div>;
+    <ArtifactPanel controller={artifacts} />
+    <ArtifactMenu controller={artifacts} />
+  </div></ArtifactContext.Provider>;
 }
 
-function ConversationTimeline({ messages, tools }: { messages: ChatMessage[]; tools: ToolRecord[] }) {
+function ConversationTimeline({ messages, tools, runs }: { messages: ChatMessage[]; tools: ToolRecord[]; runs: RunSummaryRecord[] }) {
   const items = useMemo(() => [
     ...messages.map(message => ({ type: 'message' as const, id: message.id, createdAt: message.createdAt, message })),
     ...tools.map(tool => ({ type: 'tool' as const, id: tool.id, createdAt: tool.createdAt, tool })),
-  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [messages, tools]);
+    ...runs.filter(run => run.status !== 'running' && run.endedAt).map(run => ({ type: 'summary' as const, id: run.runId, createdAt: run.endedAt!, run })),
+  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [messages, tools, runs]);
   return <>{items.map(item => item.type === 'message'
     ? <Message key={`message-${item.id}`} message={item.message} />
-    : <ToolCard key={`tool-${item.id}`} tool={item.tool} />)}</>;
+    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} /> : <RunSummary key={`run-${item.id}`} run={item.run} />)}</>;
 }
 
 function Message({ message }: { message: ChatMessage }) {
@@ -439,7 +440,11 @@ function Message({ message }: { message: ChatMessage }) {
 }
 
 function MarkdownText({ text }: { text: string }) {
-  return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} skipHtml components={{ a: ({ children }) => <span className="markdown-link">{children}</span>, img: ({ alt }) => <span className="image-placeholder">[图片：{alt || '未加载'}]</span> }}>{text}</ReactMarkdown></div>;
+  return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} urlTransform={markdownUrl} skipHtml components={{
+    a: ({ children, href }) => href && (isFileReference(href) || !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(href)) ? <ArtifactLink path={href}>{children}</ArtifactLink> : href && /^https?:\/\//i.test(href) ? <ExternalWebLink href={href}>{children}</ExternalWebLink> : <span>{children}</span>,
+    code: ({ children, className, node }) => !className && node?.position?.start.line === node?.position?.end.line && typeof children === 'string' && isFileReference(children) ? <ArtifactLink path={children}><code>{children}</code></ArtifactLink> : <code className={className}>{children}</code>,
+    img: ({ alt, src }) => src && isFileReference(src) ? <ArtifactLink path={src}><FileCode2 size={14} />{alt || '查看图片'}</ArtifactLink> : <span className="image-placeholder">[图片：{alt || '未加载'}]</span>,
+  }}>{text}</ReactMarkdown></div>;
 }
 function useClock(active: boolean) {
   const [time, setTime] = useState(Date.now());
@@ -479,8 +484,11 @@ function ToolCard({ tool }: { tool: ToolRecord }) {
   const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
   const summary = String(args.path || args.file_path || args.command || args.pattern || args.directory || '');
   const command = /powershell|shell|command/i.test(tool.name);
-  return <div className={`tool-card ${tool.status}`}>
+  const artifact = React.useContext(ArtifactContext);
+  const filePath = !command && typeof (args.path || args.file_path) === 'string' ? String(args.path || args.file_path) : '';
+  return <div className={`tool-card ${tool.status}`} onContextMenu={event => { if (filePath && tool.status === 'completed') void artifact?.showMenu(event, filePath); }}>
     <button className="tool-summary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{tool.status === 'running' ? <LoaderCircle className="spin" size={14} /> : tool.status === 'failed' ? <AlertCircle size={14} /> : command ? <Terminal size={14} /> : <FileCode2 size={14} />}<span className="tool-label">{TOOL_LABELS[tool.name] || tool.name}</span><span className="tool-short-args" title={summary}>{summary}</span>{tool.status === 'completed' && <Check size={12} className="tool-success" />}<ChevronRight size={13} className={expanded ? 'rotate-90' : ''} /></button>
+    {filePath && tool.status === 'completed' && <div className="tool-file-action"><ArtifactLink path={filePath} label={`打开文件 ${filePath}`}><FileCode2 size={13} />查看文件<ArrowUpRight size={12} /></ArtifactLink></div>}
     {expanded && <div className="tool-details"><div className="tool-detail-heading">输入</div><pre>{JSON.stringify(tool.args, null, 2)}</pre>{tool.result !== undefined && <><div className="tool-detail-heading">{tool.isError ? '错误' : '输出'}</div><pre>{tool.result || '执行完成，无输出。'}</pre></>}{tool.status === 'running' && <div className="tool-waiting">正在执行…</div>}</div>}
   </div>;
 }

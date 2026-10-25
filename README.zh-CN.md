@@ -59,6 +59,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Model qwen3.5:2
 
 官方依据：[Windows 要求](https://docs.ollama.com/windows)、[硬件支持](https://docs.ollama.com/gpu)、[默认模型](https://ollama.com/library/qwen3.5:9b-q4_K_M)。固定的便携运行时附带 NVIDIA 依赖，AMD/Intel 需另行按上游部署。模型标签可能变化；验证脚本可显示当前模型摘要。
 
+## 整轮总结与文件预览（0.1.13）
+
+- 每轮任务结束后保留独立的耗时和文件修改总结。阶段性回复可以复制，但不会因此显示本轮完成；停止或失败会保留对应状态。同一文件反复修改只计一次，改回本轮开始内容的文件不计入修改。
+- 点击生成的文件链接，可在 Agent 内查看 HTML、图片或文本。右键文件链接、工具中的文件入口或修改文件，可选择预览、查看源码、默认应用打开、选择其他 Windows 应用、在资源管理器中显示及复制完整路径。PDF 等文档通过外部应用查看。
+- HTML 支持交互脚本及项目内相对路径资源，预览在隔离框架中运行，阻止联网和访问 Agent。文件统计采用有范围上限的项目快照，明确提示统计限制及同时发生的外部修改。
+
+使用方式、统计边界及验证命令见[整轮总结与文件预览说明](docs/TURN_SUMMARIES_AND_PREVIEWS.md)（英文）。
+
 ## 架构与开发
 
 React 渲染端通过验证后的 IPC 连接 Electron 主进程；主进程管理会话、Windows 加密凭证、请求排队和审批；每个活跃会话拥有独立 Agent worker，使用固定 pi SDK 1.4.0，调用受范围约束的文件工具、需审批的 PowerShell 和本地 Ollama / 自选 API。

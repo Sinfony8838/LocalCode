@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { Store } from './store';
 import { RequestScheduler } from './request-scheduler';
+import { ArtifactController } from './artifacts';
+import { PREVIEW_SCHEME, externalBrowserUrl } from '../core/artifacts';
 import { createHash } from 'node:crypto';
 import { providerSchema, testConnection } from './providers';
 import { selectProviderModel } from '../shared/providers';
@@ -23,8 +25,12 @@ app.setPath('sessionData', path.join(cacheDir, 'chromium'));
 app.setPath('crashDumps', path.join(cacheDir, 'crashes'));
 app.setAppLogsPath(path.join(home, 'logs'));
 process.env.TEMP = cacheDir; process.env.TMP = cacheDir;
-protocol.registerSchemesAsPrivileged([{ scheme: 'localcode', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'localcode', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 const store = new Store(dataDir);
+const artifacts = new ArtifactController();
 let window: BrowserWindow | undefined;
 const pets = new PetController(home, __dirname, () => window, () => { window?.restore(); window?.show(); window?.focus(); });
 type ActiveRun = { runId: string; sessionId: string; apiKey?: string; child: UtilityProcess; requestGroup: string };
@@ -81,9 +87,10 @@ async function processEvent(raw: AgentEvent) {
   let event = raw;
   if (active.apiKey && active.apiKey.length >= 6) event = JSON.parse(JSON.stringify(raw).split(active.apiKey).join('[密钥已隐藏]'));
   // The worker emits settled only after inference, approvals and commands are cleaned up.
-  // Release the run before publishing its completed status into the in-memory store.
+  // Keep the run locked until the final disk snapshot and durable summary settle.
+  // Otherwise an undo from another idle session can race the final file scan.
+  event = await store.event(event) ?? event;
   if (event.type === 'settled') { requestScheduler.cancel(active.runId); runs.delete(event.sessionId); }
-  await store.event(event);
   if (['status', 'settled', 'approval', 'approval_resolved'].includes(event.type)) {
     const sessions = store.sessions();
     const other = sessions.find(session => session.status === 'awaiting_approval') || sessions.find(session => session.status === 'running');
@@ -170,6 +177,9 @@ const schemas: Record<string, z.ZodType> = {
   send: z.object({ sessionId: id, prompt: z.string().trim().min(1).max(30000), providerId, modelId: z.string().min(1).max(200).optional() }).strict(), stop: id,
   approve: z.object({ runId: id, approvalId: z.string().min(1).max(200), allow: z.boolean() }).strict(),
   listFiles: z.object({ projectId: id, directory: z.string().max(2048).optional() }).strict(), readFile: z.object({ projectId: id, path: relPath }).strict(),
+  artifactInfo: z.object({ projectId: id, path: z.string().min(1).max(4096) }).strict(),
+  artifactAction: z.object({ projectId: id, path: z.string().min(1).max(4096), action: z.enum(['open', 'choose-app', 'reveal', 'copy-path']) }).strict(),
+  openExternal: z.string().min(1).max(4096),
   changes: id, undo: z.object({ sessionId: id, path: relPath }).strict(),
   saveProvider: providerSchema,
   deleteProvider: providerId,
@@ -211,7 +221,7 @@ async function invoke(method: string, arg: any) {
         if (active) await processEvent({ type: 'settled', runId: active.runId, sessionId: active.sessionId, status: quitting || startup.cancelled ? 'interrupted' : 'failed', error: (error as Error).message });
         else if (begun?.runId) {
           const event: AgentEvent = { type: 'settled', runId: begun.runId, sessionId: begun.id, status: 'failed', error: (error as Error).message };
-          await store.event(event); emit(event);
+          emit(await store.event(event) ?? event);
         }
         throw error;
       } finally { starting.delete(arg.sessionId); }
@@ -220,6 +230,9 @@ async function invoke(method: string, arg: any) {
     case 'approve': { const active = [...runs.values()].find(run => run.runId === arg.runId); if (!active) throw new Error('审批已失效，命令未执行。'); const approval = store.session(active.sessionId).approval; if (!approval || approval.id !== arg.approvalId || approval.runId !== arg.runId) throw new Error('审批不匹配或已失效。'); post(active, { type: 'approve', ...arg }); return; }
     case 'listFiles': return listWorkspaceFiles(store.project(arg.projectId).path, arg.directory || '');
     case 'readFile': return readWorkspaceFile(store.project(arg.projectId).path, arg.path);
+    case 'artifactInfo': return artifacts.info(store.project(arg.projectId).path, arg.path);
+    case 'artifactAction': return artifacts.action(store.project(arg.projectId).path, arg.path, arg.action);
+    case 'openExternal': await shell.openExternal(externalBrowserUrl(arg)); return;
     case 'changes': store.session(arg); return getChanges(dataDir, arg);
     case 'undo': if (runs.size || starting.size) throw new Error('请先停止运行中的任务，再撤销文件修改。'); store.session(arg.sessionId); await undoChange(dataDir, arg.sessionId, arg.path); emit({ type: 'state_changed' }); return;
     case 'saveProvider': { if (runs.size || starting.size) throw new Error('任务运行时不能修改模型配置。'); const { apiKey, ...publicData } = arg; let cipher: string | undefined; if (apiKey) { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 密钥加密暂不可用，未保存密钥。'); cipher = safeStorage.encryptString(apiKey).toString('base64'); } const p = await store.saveProvider({ ...publicData, hasKey: false }, cipher); emit({ type: 'state_changed' }); return p; }
@@ -240,6 +253,7 @@ async function invoke(method: string, arg: any) {
 }
 async function createWindow() {
   const rendererRoot = path.join(__dirname, 'renderer');
+  protocol.handle(PREVIEW_SCHEME, request => artifacts.response(request));
   protocol.handle('localcode', async request => {
     try {
       const url = new URL(request.url);
@@ -249,15 +263,25 @@ async function createWindow() {
       const filename = path.resolve(rendererRoot, '.' + decodeURIComponent(url.pathname || '/index.html'));
       if (!filename.startsWith(rendererRoot + path.sep)) return new Response('Forbidden', { status: 403 });
       const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
-      return new Response(await fs.readFile(filename), { headers: { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'" } });
+      return new Response(await fs.readFile(filename), { headers: { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: localcode-preview:; font-src 'self'; connect-src 'self'; frame-src localcode-preview:; object-src 'none'; base-uri 'none'" } });
     } catch { return new Response('Not found', { status: 404 }); }
   });
   const { workArea } = screen.getPrimaryDisplay();
   const width = Math.min(1200, Math.floor(workArea.width * .9));
   const height = Math.min(800, Math.floor(workArea.height * .9));
   window = new BrowserWindow({ width, height, x: workArea.x + Math.floor((workArea.width - width) / 2), y: workArea.y + Math.floor((workArea.height - height) / 2), minWidth: Math.min(1050, width), minHeight: Math.min(700, height), fullscreen: false, title: 'LocalCode', backgroundColor: '#f9edf1', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
-  window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
+  // Only explicit main-frame IPC opens browser links; preview popups never do.
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('will-frame-navigate', event => {
+    if (event.isMainFrame || !event.url.startsWith(`${PREVIEW_SCHEME}://`)) event.preventDefault();
+  });
+  // CSP blocks asset traffic; also prevent document navigation and browser requests
+  // from preview frames reaching the network or raw file URLs.
+  window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'file://*/*'] }, (details, callback) => {
+    callback({ cancel: details.webContentsId === window?.webContents.id });
+  });
+  window.webContents.session.on('will-download', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   window.once('ready-to-show', () => window?.show());
   window.on('close', event => { if (!quitReady) { event.preventDefault(); void shutdown(); } });

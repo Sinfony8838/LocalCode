@@ -32,3 +32,6 @@
 **/tests/.command-*/
 **/tests/.engine-*/
 /Ollama/Agent.Modelfile
+
+**/tests/.artifacts-*/
+**/tests/.artifact-actions-*/

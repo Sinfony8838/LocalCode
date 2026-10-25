@@ -1,5 +1,29 @@
 # Open-source release review
 
+## 0.1.13 turn summaries and artifact previews
+
+Reviewed on 2026-10-25 (Asia/Shanghai). This source update adds completion records only after an entire agent turn settles, independent per-turn file statistics, file opening menus, and isolated HTML/image previews. It retains the portable paths, validated model profile, configurable local budgets, dependency security override, packaging allowlist, and artwork exclusions from the 0.1.12 baseline below.
+
+Validation of this updated source:
+
+| Check | Result |
+| --- | --- |
+| TypeScript and production build | PASS |
+| Unit/integration regression | PASS; 83 tests, including ignored-path and Windows case-insensitive file accounting |
+| Actual Electron artifact acceptance | PASS; 8 checks covering intermediate messages, consecutive turns, HTML interaction, source/menu actions, external-link IPC, cancellation/failure, themes and restart |
+| Production dependency audit | PASS; 0 reported vulnerabilities |
+| Exact staged-source scanner and credential comparison | PASS; no stored credential ciphertext matched the publication set |
+| Gitleaks staged scan | PASS; no leaks found |
+| New packaged binary, real Ollama/model inference and cloud calls | UNRUN for this source update; no binary published and no paid requests made |
+
+The desktop test used an isolated application home and localhost synthetic responses. Browser/default-app/Explorer launches were intercepted; the Windows application chooser argument construction was unit-tested without interactive OS selection. HTML's local scripts and assets ran in a real Electron iframe. PDF remains an external-application workflow. Local test evidence is retained outside Git; GitHub CI status must be verified against the PR commit. The workflow now runs the same desktop artifact acceptance after building.
+
+See [turn summaries and previews](TURN_SUMMARIES_AND_PREVIEWS.md) for usage, snapshot limits, and reproduction commands.
+
+---
+
+The following review records the original **0.1.12 baseline**, including its separate packaging and hardware evidence.
+
 Review date: 2026-10-25 (Asia/Shanghai). Version: 0.1.12.
 
 ## Publication scope
