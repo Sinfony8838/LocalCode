@@ -28,9 +28,13 @@ jobs:
           & (Join-Path $target 'gitleaks.exe') git --redact --no-banner .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check setup without downloads (Windows PowerShell 5.1)
+        id: setup51
+        continue-on-error: true
         shell: powershell
         run: .\scripts\Test-Setup.ps1
       - name: Check setup without downloads (PowerShell 7)
+        id: setup7
+        continue-on-error: true
         shell: pwsh
         run: .\scripts\Test-Setup.ps1
       - name: Test portable package allowlist
@@ -87,6 +91,15 @@ jobs:
           Compress-Archive -LiteralPath "$env:RUNNER_TEMP/$name" -DestinationPath "$out/$name.zip"
           $hash = (Get-FileHash "$out/$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $name.zip" | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+      # Collect independent desktop failures even if setup smoke failed, but
+      # never make the job green or publish a download with failed setup checks.
+      - name: Require successful setup smoke checks
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.setup51.outcome }}' -ne 'success' -or '${{ steps.setup7.outcome }}' -ne 'success') {
+            throw 'Both Windows PowerShell setup smoke suites must pass.'
+          }
       - name: Retain tested Windows download
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

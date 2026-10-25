@@ -20,6 +20,12 @@ function File-Snapshot([string]$Folder) {
         "$($_.FullName)|$($_.LastWriteTimeUtc.Ticks)|$(if (-not $_.PSIsContainer) { $_.Length })"
     })) -join "`n"
 }
+function File-ContentSnapshot([string]$Folder) {
+    @((Get-ChildItem -LiteralPath $Folder -Recurse -Force | Sort-Object FullName | ForEach-Object {
+        if ($_.PSIsContainer) { "$($_.FullName)|directory" }
+        else { "$($_.FullName)|file|$($_.Length)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)" }
+    })) -join "`n"
+}
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('LocalCode-setup-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp | Out-Null
 try {
@@ -230,11 +236,28 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $fixture 'scripts') | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Setup.Helpers.ps1') -Destination (Join-Path $fixture 'scripts')
     Remove-Item -LiteralPath $app -Recurse
+    $beforeContent = File-ContentSnapshot $fixture
     $before = File-Snapshot $fixture
     $output = & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixture 'Setup.ps1') -ModelOnly
     Assert ($LASTEXITCODE -ne 0) 'Missing desktop rejects ModelOnly'
     Assert (($output -join "`n") -match 'no model will be downloaded') 'Missing desktop supplies actionable instructions'
-    Assert ((File-Snapshot $fixture) -eq $before) 'Rejected ModelOnly creates no files/downloads'
+    $after = File-Snapshot $fixture
+    $afterContent = File-ContentSnapshot $fixture
+    if ($after -ne $before) {
+        Write-Host 'Unexpected filesystem metadata difference: <= before, => after; path|LastWriteTimeUtc.Ticks|length'
+        Compare-Object -ReferenceObject @($before -split "`n") -DifferenceObject @($after -split "`n") | ForEach-Object {
+            Write-Host "$($_.SideIndicator) $($_.InputObject)"
+        }
+        if ($afterContent -eq $beforeContent) {
+            Write-Host 'Independent content/path comparison: IDENTICAL (all file SHA-256 hashes, lengths and directory/file paths).'
+        } else {
+            Write-Host 'Independent content/path difference: <= before, => after; path|type|length|SHA-256'
+            Compare-Object -ReferenceObject @($beforeContent -split "`n") -DifferenceObject @($afterContent -split "`n") | ForEach-Object {
+                Write-Host "$($_.SideIndicator) $($_.InputObject)"
+            }
+        }
+    }
+    Assert ($after -eq $before) 'Rejected ModelOnly creates no files/downloads'
     Write-Host "Setup smoke tests: PASS ($checks checks; no real downloads or service starts)"
 } finally {
     # Delete only this test's own unique synthetic fixture directory.
