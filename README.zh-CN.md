@@ -4,7 +4,7 @@
 
 面向 Windows 的本地编程桌面：Electron + React + TypeScript，每个会话独立运行 Agent，默认用本机 Ollama 推理。可读取和编辑项目、查看修改、审批终端命令、恢复会话；桌面界面为中文。可选接入 OpenAI Chat Completions、Responses、Anthropic Messages。
 
-本仓库公开完整应用架构、源码、测试、依赖锁及一键部署脚本。**不包含个人 API Key（包括加密形式）、会话、项目快照、日志、浏览器配置、程序发行包或模型权重。**
+本仓库公开完整应用架构、源码、测试、依赖锁及一键部署脚本。
 
 ## 一键复现
 
