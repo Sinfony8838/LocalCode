@@ -14,6 +14,7 @@ import { managedOllamaState, startManagedOllama } from './managed-ollama';
 import { providerSchema, testConnection } from './providers';
 import { selectProviderModel } from '../shared/providers';
 import { PetController } from './pets';
+import { workspaceBoundary } from '../core/workspace-context';
 import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange, previewChangeCheckpoint, checkpointChange } from '../core/workspace';
 import { cleanupOwnedCommands } from '../core/command';
 import type { AgentEvent, AppEvent, ModelHealth, ProviderSecret, WorkerCommand, TransportMessage, TransportGrant } from '../shared/contracts';
@@ -197,6 +198,7 @@ async function invoke(method: string, arg: any) {
       try {
       await recovering.get(arg.sessionId);
       await eventQueue;
+      await workspaceBoundary(store.sessionWorkspace(arg.sessionId));
       const provider = selectProviderModel(store.provider(arg.providerId), arg.modelId);
       if (provider.kind === 'ollama') { const h = await health(); if (!h.online || !h.modelAvailable) throw new Error(h.message || '本地模型不可用'); }
       const cipher = store.encryptedKey(provider.id);
@@ -210,7 +212,7 @@ async function invoke(method: string, arg: any) {
       active = { runId: session.runId!, sessionId: session.id, apiKey: provider.kind !== 'ollama' ? secret.apiKey : undefined, child, requestGroup };
       runs.set(session.id, active);
       if (quitting || startup.cancelled) throw new Error('启动已取消，任务未执行。');
-      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, projectPath: store.project(session.projectId).path, dataDir, piFile: session.piFile, provider: secret, prompt: arg.prompt });
+      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, ...store.sessionWorkspace(session.id), piFile: session.piFile, provider: secret, prompt: arg.prompt });
       emit({ type: 'state_changed' }); return { runId: session.runId };
       } catch (error) {
         if (active) await processEvent({ type: 'settled', runId: active.runId, sessionId: active.sessionId, status: quitting || startup.cancelled ? 'interrupted' : 'failed', error: (error as Error).message });
@@ -223,21 +225,21 @@ async function invoke(method: string, arg: any) {
     }
     case 'stop': await stopRun(arg); return;
     case 'approve': { const active = [...runs.values()].find(run => run.runId === arg.runId); if (!active) throw new Error('审批已失效，命令未执行。'); const approval = store.session(active.sessionId).approval; if (!approval || approval.id !== arg.approvalId || approval.runId !== arg.runId) throw new Error('审批不匹配或已失效。'); post(active, { type: 'approve', ...arg }); return; }
-    case 'listFiles': return listWorkspaceFiles(store.project(arg.projectId).path, arg.directory || '');
-    case 'readFile': return readWorkspaceFile(store.project(arg.projectId).path, arg.path);
-    case 'artifactInfo': return artifacts.info(store.project(arg.projectId).path, arg.path, arg.inputKind);
-    case 'artifactAction': return artifacts.action(store.project(arg.projectId).path, arg.path, arg.action, arg.inputKind);
+    case 'listFiles': return listWorkspaceFiles(store.workspace(arg.projectId), arg.directory || '');
+    case 'readFile': return readWorkspaceFile(store.workspace(arg.projectId), arg.path);
+    case 'artifactInfo': return artifacts.info(store.workspace(arg.projectId), arg.path, arg.inputKind);
+    case 'artifactAction': return artifacts.action(store.workspace(arg.projectId), arg.path, arg.action, arg.inputKind);
     case 'openExternal': await shell.openExternal(externalBrowserUrl(arg)); return;
-    case 'changes': store.session(arg); return getChanges(dataDir, arg);
-    case 'previewCheckpoint': assertChangesIdle(); store.session(arg.sessionId); return previewChangeCheckpoint(dataDir, arg.sessionId, arg.path);
+    case 'changes': return getChanges(store.sessionWorkspace(arg), arg);
+    case 'previewCheckpoint': assertChangesIdle(); store.session(arg.sessionId); return previewChangeCheckpoint(store.sessionWorkspace(arg.sessionId), arg.sessionId, arg.path);
     case 'undo':
     case 'checkpoint': {
       assertChangesIdle(); store.session(arg.sessionId);
       // Reserve synchronously, before any await, so a new send cannot race this operation.
       changingFiles = true;
       try {
-        if (method === 'undo') await undoChange(dataDir, arg.sessionId, arg.path);
-        else await checkpointChange(dataDir, arg.sessionId, arg.path, arg.expectedHash, arg.expectedRecordHash);
+        if (method === 'undo') await undoChange(store.sessionWorkspace(arg.sessionId), arg.sessionId, arg.path);
+        else await checkpointChange(store.sessionWorkspace(arg.sessionId), arg.sessionId, arg.path, arg.expectedHash, arg.expectedRecordHash);
         emit({ type: 'state_changed' });
       } finally { changingFiles = false; }
       return;

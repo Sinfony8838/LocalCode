@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "candidateCommit": "FILL_FROM_CANDIDATE_MANIFEST",
+  "portableZipSha256": "FILL_FROM_SHA256SUMS",
+  "sourceZipSha256": "FILL_FROM_SHA256SUMS",
+  "environmentReport": "FILL_REPORT_FILENAME",
+  "cases": [
+    { "id": "P01", "title": "Portable full extraction, Start.cmd, settings and cloud selection without global tools", "status": "UNRUN", "evidence": "" },
+    { "id": "S01", "title": "Source Setup.cmd desktop-only path", "status": "UNRUN", "evidence": "" },
+    { "id": "S02", "title": "Source Setup.cmd local-model and desktop path, new default runtime/model", "status": "UNRUN", "evidence": "" },
+    { "id": "F01", "title": "Chinese and space-containing extraction paths", "status": "UNRUN", "evidence": "" },
+    { "id": "F02", "title": "Offline/interrupted download then retry from the same folder", "status": "UNRUN", "evidence": "" },
+    { "id": "F03", "title": "Insufficient space on a disposable test disk, no old data deleted", "status": "UNRUN", "evidence": "" },
+    { "id": "F04", "title": "Existing Ollama owns port 11434, preserved after managed setup refusal", "status": "UNRUN", "evidence": "" },
+    { "id": "F05", "title": "Missing files in a disposable package copy, actionable repair/retry message", "status": "UNRUN", "evidence": "" },
+    { "id": "M01", "title": "Real default Ollama inference with tool edit, approved test, denial, cancellation and summary", "status": "UNRUN", "evidence": "" },
+    { "id": "M02", "title": "Computer reboot then explicit managed-service start, same installed model and real inference", "status": "UNRUN", "evidence": "" }
+  ],
+  "model": { "ollamaVersion": "UNRUN", "tag": "qwen3.5:9b-q4_K_M", "digest": "UNRUN", "calls": null, "cost": "local; no cloud requests required" },
+  "releaseReady": false
+}

@@ -1,3 +1,4 @@
+import { workspaceBoundary, type WorkspaceContext } from '../core/workspace-context.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync } from 'node:fs';
 import { mkdir, realpath, stat } from 'node:fs/promises';
@@ -21,8 +22,8 @@ export interface EngineSession {
   dispose(): void;
   sessionManager: { getSessionFile(): string | undefined };
 }
-export interface EngineToolContext {
-  projectPath: string; dataDir: string; sessionId: string; runId: string; maxResultChars: number;
+export interface EngineToolContext extends WorkspaceContext {
+  sessionId: string; runId: string; maxResultChars: number;
   emit(event: AgentEvent): void;
   requestApproval(input: { command: string; cwd: string }, signal?: AbortSignal): Promise<boolean>;
   beforeTool(name: string, args: unknown): void;
@@ -446,12 +447,13 @@ export class AgentEngine {
     try {
       this.send(run, { type: 'status', status: 'running' });
       const request = run.request;
+      await workspaceBoundary(request);
       const logs = path.join(request.dataDir, 'logs'); await mkdir(logs, { recursive: true });
       run.logFile = path.join(logs, `agent-${request.runId}.jsonl`);
       this.log(run, { type: 'run_start', sessionId: request.sessionId, model: request.provider.model,
         contextWindow: request.provider.contextWindow, maxTokens: request.provider.maxTokens });
       run.controller.signal.throwIfAborted();
-      const context: EngineToolContext = { projectPath: request.projectPath, dataDir: request.dataDir,
+      const context: EngineToolContext = { projectPath: request.projectPath, dataDir: request.dataDir, protectedRoots: request.protectedRoots,
         sessionId: request.sessionId, runId: request.runId,
         maxResultChars: request.provider.contextWindow <= 4096 ? 1800 : 4000,
         emit: event => { if (this.active === run) this.send(run, event); },

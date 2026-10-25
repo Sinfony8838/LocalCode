@@ -1,3 +1,4 @@
+import { workspaceContext, workspaceBoundary, isWorkspaceAccessError, pathKey } from '../core/workspace-context';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -43,7 +44,7 @@ export class Store {
         run.status = 'interrupted'; run.endedAt = session.updatedAt;
         delete run.finalMessageId;
         run.durationMs = Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt));
-        Object.assign(run, await recoverRunChanges(this.dataDir, session.id, run.runId));
+        Object.assign(run, await recoverRunChanges(this.sessionWorkspace(session.id), session.id, run.runId));
       }
       session.messages.filter(m => m.partial).forEach(m => { m.partial = false; });
       for (const message of session.messages) for (const part of message.parts ?? []) if (part.state === 'streaming') { part.state = 'interrupted'; part.endedAt = new Date().toISOString(); }
@@ -92,11 +93,13 @@ export class Store {
   project(id: string) { const p = this.state.projects.find(p => p.id === id); if (!p) throw new Error('项目不存在'); return p; }
   session(id: string) { const s = this.state.sessions.find(s => s.id === id); if (!s) throw new Error('会话不存在'); return s; }
   provider(id: string) { const p = this.state.settings.providers.find(p => p.id === id); if (!p) throw new Error('模型配置不存在'); return p; }
+  workspace(projectId: string) { return workspaceContext(this.project(projectId).path, this.dataDir); }
+  sessionWorkspace(sessionId: string) { return this.workspace(this.session(sessionId).projectId); }
   encryptedKey(id: string) { return this.state.keys[id]; }
   async addProject(folder: string) {
     const canonical = await fs.realpath(folder);
-    if (!(await fs.stat(canonical)).isDirectory()) throw new Error('请选择文件夹');
-    const existing = this.state.projects.find(p => p.path.toLowerCase() === canonical.toLowerCase());
+    await workspaceBoundary(workspaceContext(canonical, this.dataDir));
+    const existing = this.state.projects.find(p => pathKey(p.path) === pathKey(canonical));
     if (existing) return structuredClone(existing);
     const project = { id: randomUUID(), name: path.basename(canonical) || canonical, path: canonical, createdAt: new Date().toISOString() };
     this.state.projects.push(project); await this.persist(); return structuredClone(project);
@@ -110,13 +113,15 @@ export class Store {
   async renameSession(id: string, title: string) { const s = this.session(id); s.title = title; await this.persist(); return structuredClone(s); }
   async beginRun(sessionId: string, prompt: string, providerId: string, modelId?: string) {
     const s = this.session(sessionId); this.provider(providerId);
+    const workspace = this.sessionWorkspace(sessionId);
+    await workspaceBoundary(workspace);
     // Main-process guards prevent overlap; retain a truthful boundary if callers
     // replace an unfinished round (for example during recovery).
     for (const previous of s.runs ?? []) if (previous.status === 'running') {
       previous.status = 'interrupted'; previous.endedAt = new Date().toISOString();
       delete previous.finalMessageId;
       previous.durationMs = Math.max(0, Date.parse(previous.endedAt) - Date.parse(previous.startedAt));
-      Object.assign(previous, await recoverRunChanges(this.dataDir, sessionId, previous.runId));
+      Object.assign(previous, await recoverRunChanges(this.sessionWorkspace(sessionId), sessionId, previous.runId));
     }
     s.runId = randomUUID(); s.status = 'running'; s.providerId = providerId; s.error = undefined; s.approval = undefined;
     delete s.progress;
@@ -126,8 +131,8 @@ export class Store {
     s.messages.push({ id: randomUUID(), role: 'user', text: prompt, createdAt: s.updatedAt, runId: s.runId });
     const run = { runId: s.runId, startedAt: s.updatedAt, status: 'running' as const, changes: [], changeScope: 'workspace_snapshot' as const };
     (s.runs ??= []).push(run);
-    try { await beginRunChanges(this.dataDir, sessionId, s.runId, this.project(s.projectId).path); }
-    catch { /* Settlement explicitly reports unavailable baseline; model work may still proceed. */ }
+    try { await beginRunChanges(workspace, sessionId, s.runId); }
+    catch (error) { if (isWorkspaceAccessError(error)) throw error; /* Settlement reports unavailable baseline for ordinary I/O errors. */ }
     await this.persist(); return structuredClone(s);
   }
   async event(event: AgentEvent): Promise<AgentEvent | undefined> {
@@ -141,7 +146,7 @@ export class Store {
     if (run && run.status !== 'running') return event;
     if (event.type === 'settled' && run) {
       const endedAt = event.recordedAt!;
-      const evidence = await finishRunChanges(this.dataDir, event.sessionId, event.runId, this.project(current.projectId).path);
+      const evidence = await finishRunChanges(this.sessionWorkspace(event.sessionId), event.sessionId, event.runId);
       const finalMessageId = event.status === 'completed' ? run.finalMessageId : undefined;
       event = { ...event, summary: { ...run, ...evidence, status: event.status, endedAt, durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(run.startedAt)), finalMessageId } };
     }

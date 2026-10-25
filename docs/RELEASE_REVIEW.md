@@ -1,5 +1,39 @@
 # Open-source release review
 
+## 0.1.15 application-data isolation candidate — RELEASE HOLD
+
+Reviewed on 2026-10-25 (Asia/Shanghai), starting from `8c9d04cd54a51d53f203cc10194230cb456ff7ef`. This update adds a mandatory workspace capability shared by file tools, the file browser, previews and run snapshots. Application data/cache/log directories are excluded by canonical path and link checks. Changes, undo, checkpoints and recovery receive the session's registered project root; journal paths cannot select a different project. Session storage aliases and multi-linked files are refused. Existing histories remain in place; unsafe legacy operations fail with an explicit error.
+
+| Check | Result |
+| --- | --- |
+| TypeScript and production build | PASS locally |
+| Unit/integration regression | PASS; 154 passed, 2 non-Windows-only checks skipped on Windows, 19 files; includes 17 new synthetic isolation cases |
+| Windows PowerShell 5.1 and PowerShell 7 setup checks | PASS; 132 checks in each shell, no actual downloads or service starts |
+| Portable allowlist regression | PASS; 3 passed, 1 Linux-only symlink negative control skipped on Windows |
+| Real Electron source isolation acceptance | PASS; project selection, file/browser/preview denial, journal ownership, normal history/checkpoint/undo, explicit data-folder opening |
+| Existing Electron checkpoint, model-setup and artifact acceptance | PASS with isolated homes and synthetic responses; not real-model capability evidence |
+| Production dependency audit | PASS locally; 0 reported vulnerabilities |
+| Real Ark Coding Plan cloud task acceptance | PASS in source Electron with `ark-code-latest` / Anthropic: user-entered isolated credential, save/test/select, file read/edit, approved test, denied command, cancellation and ten-second no-further-tools observation; 8 request attempts |
+| Clean non-administrator Windows installation | UNRUN; external tester's environment report and actual results required |
+| Fresh default Ollama/model installation, inference and computer reboot | UNRUN; existing local installations do not satisfy this gate |
+| Final package, hosted CI and public GitHub Release | PENDING; no release readiness claim |
+
+All isolation fixtures use temporary directories and fabricated records. The first restricted local run failed because junctions, links, localhost access and process verification were restricted; the full-permission Windows run passed. An intermediate run encountered a transient `EPERM` on atomic workspace rename; its result was retained and the subsequent complete run passed without replacing atomic writes with truncation. These failures are not counted as successful checks.
+
+The real-cloud harness reads provider metadata but requires credentials to be saved directly in its isolated desktop. It copies neither original credentials nor Chromium encryption metadata. It records actual task outcomes, request attempts, returned model identifiers and usage when available; a subscription price or underlying alias version is unknown unless the provider exposes it. A settings-only response is not proof of tool execution.
+
+The successful source cloud run recorded 7 task requests and 1 connection-test request. Saved assistant usage totaled 5,757 input, 1,439 output and 3,840 cache-read tokens (11,036 total); the separate connection test reported 88 input and 16 output tokens. Returned identifiers were `auto` and `ark-code-latest`, which do not establish the underlying model revision. Billing/monetary cost is UNKNOWN. The original configuration file remained byte-identical. Earlier harness attempts stopped at a disabled save button and incompatible encrypted profile context; they do not count as successful cloud acceptance. No credential/protection-metadata extraction was used in the successful run. This proves the tested synthetic tasks, not general coding quality or fresh-machine/local-model acceptance.
+
+Reproduction: run the standard typecheck/test/build pipeline, `node scripts/acceptance-isolation.mjs`, and the existing Electron suites from the desktop source directory. CI requires isolation checks for both source and packaged Electron. The external test kit is under [scripts/acceptance](../scripts/acceptance/README.zh-CN.md). `scripts/Build-Candidate.ps1 -OutputDirectory <new-folder>` accepts only a clean committed checkout and creates allowlisted portable/source/test-kit ZIPs, SHA-256 sums and a manifest with `releaseReady: false`. These are candidate artifacts, not a formal release.
+
+The eventual release evidence manifest must bind the final main-branch SHA, exact ZIP hashes, CI run, clean-machine results and real-model results. The published ZIPs must be the exact bytes tested after final extraction/startup verification. Generate that manifest as a release asset after packaging; do not change source merely to insert its own package hash. No certificate purchase is included; the Windows application remains unsigned.
+
+## 0.1.14 onboarding baseline — historical, not release acceptance
+
+PR #2 merged as `8c9d04cd54a51d53f203cc10194230cb456ff7ef`; [main-branch Source checks run 40191059550](https://github.com/Sinfony8838/LocalCode/actions/runs/40191059550) completed successfully. The application-data isolation blocker was explicitly unresolved at that commit. The workflow produced a 14-day Actions artifact, not a formal GitHub Release. Its preinstalled CI tools and synthetic model responses did not establish clean-machine installation or real cloud/Ollama task acceptance. The 83-test count in the older section below belongs to 0.1.13 only.
+
+---
+
 ## 0.1.13 turn summaries and artifact previews
 
 Reviewed on 2026-10-25 (Asia/Shanghai). This source update adds completion records only after an entire agent turn settles, independent per-turn file statistics, file opening menus, and isolated HTML/image previews. It retains the portable paths, validated model profile, configurable local budgets, dependency security override, packaging allowlist, and artwork exclusions from the 0.1.12 baseline below.

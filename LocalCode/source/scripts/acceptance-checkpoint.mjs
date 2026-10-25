@@ -43,7 +43,7 @@ try {
   await page.getByRole('button', { name: '打开项目文件夹', exact: true }).first().click();
   sessionId = await page.evaluate(async () => { const boot = await window.localcode.bootstrap(); return (await window.localcode.createSession(boot.projects[0].id)).id; });
   await app.close(); app = undefined;
-  context = { projectPath: project, dataDir: path.join(home, 'data'), sessionId, runId: randomUUID() };
+  context = { projectPath: project, dataDir: path.join(home, 'data'), protectedRoots: ['data', 'cache', 'logs'].map(name => path.join(home, name)), sessionId, runId: randomUUID() };
   await writeWorkspaceText({ ...context, relativePath: 'code.ts', content: 'const value=2;\n' });
   journalFile = path.join(context.dataDir, 'changes', sessionId, 'index.json');
   const firstJournal = await journal();

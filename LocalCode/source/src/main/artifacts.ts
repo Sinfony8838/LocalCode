@@ -1,3 +1,4 @@
+import type { WorkspaceContext } from '../core/workspace-context';
 import { clipboard, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -5,13 +6,13 @@ import { ArtifactPreviews, resolveArtifactPath } from '../core/artifacts';
 import type { ArtifactAction, ArtifactInputKind } from '../shared/artifacts';
 
 export class ArtifactController extends ArtifactPreviews {
-  async action(projectPath: string, input: string, action: ArtifactAction, inputKind: ArtifactInputKind = 'path'): Promise<void> {
-    const target = await resolveArtifactPath(projectPath, input, inputKind);
+  async action(ctx: WorkspaceContext, input: string, action: ArtifactAction, inputKind: ArtifactInputKind = 'path'): Promise<void> {
+    const target = await resolveArtifactPath(ctx, input, inputKind);
     switch (action) {
       case 'copy-path': clipboard.writeText(target.absolute); return;
       case 'reveal': shell.showItemInFolder(target.absolute); return;
       case 'open': {
-        const info = await this.info(projectPath, target.relative);
+        const info = await this.info(ctx, target.relative);
         if (!info.canOpenExternally) throw new Error('此文件可能直接执行程序，请使用“选择其他应用打开”并选择编辑器。');
         const error = await shell.openPath(target.absolute);
         if (error) throw new Error(`无法打开文件：${error}`);
