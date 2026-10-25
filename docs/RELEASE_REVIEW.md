@@ -1,5 +1,21 @@
 # Open-source release review
 
+## 0.1.15 exact 620de707 package — local checks passed, RELEASE HOLD
+
+The clean source commit `620de7078c339c1953190f004f747e9743b47a1d` passed both [push CI 40202782603](https://github.com/Sinfony8838/LocalCode/actions/runs/40202782603) and [PR CI 40202785989](https://github.com/Sinfony8838/LocalCode/actions/runs/40202785989). Its local full unit run passed 181 tests with 2 platform skips. The exact newly built executable passed all six packaged Electron suites: isolation (4 checks), typography (6), artifacts (9), checkpoints (4), model setup (4) and language (7), totaling 34 checks. EXE, main and worker hashes were unchanged before and after those suites:
+
+| Component | SHA-256 |
+| --- | --- |
+| LocalCode.exe | `f23f902c4ce3ff6767d968407539a49bc40a6624437e069c08dba95e3dd67254` |
+| main.cjs | `a8abeb005a9507210c49c9bdc30702fd335c1a32922b800b1139a8bd85967bc1` |
+| worker.mjs | `02be7547dbbd180d91c61124f442ceff31f32eb0639898a78b7e221b0d99b38c` |
+
+Real Ark Coding Plan acceptance also passed against this exact packaged executable from clean `620de707` source: 1 connection request and 7 task requests, including actual file reads/edits, an approved passing terminal test, a denied command and cancellation with no further tools during the ten-second observation. Task responses reported 3,150 input, 1,200 output and 6,912 cache-read tokens (11,262 total); the separate connection response reported 88 input and 16 output tokens. This remains a bounded synthetic-project check. Billing and the underlying mutable model-alias revision remain unknown. The earlier `b745481` failure and repeat below are retained as separate historical results.
+
+The external report identified Windows 11 x64 without global Node/npm/Ollama, but with Git already present; Python command entries were reported only as Windows Store aliases. It therefore does not meet the agreed all-tools-absent clean-environment condition. A startup window was observed, but the observation was not bound to an exact ZIP hash. The first default local installation encountered a GitHub HTTPS/443 curl 28 timeout. The user reports that a retry is downloading; successful installation is not confirmed. Fresh-default-model tasks and a full computer reboot remain UNRUN. These observations do not establish completed external acceptance.
+
+Application-data isolation is no longer an unresolved code blocker: its fix passed local regression. Formal release remains on hold for the outstanding clean-Windows and fresh default Ollama task/reboot acceptance and final archive verification. Candidate artifacts, including the historical r5 candidate, are not recommended formal releases. No new EXE or candidate archive is produced by this text-only update.
+
 ## 0.1.15 source integration with multilingual main — RELEASE HOLD
 
 The next integration freezes main at `8ee612ef45e4d512e4226eb82ada1ad7827b59ea` (PR #5 languages and PR #7 progress wording), combined with the isolation/typography branch and the Restricted-parent acceptance launcher fix. Workspace capabilities, trusted session-to-project resolution and per-session storage checks remain intact. Worker requests carry both the complete workspace capability and the language captured when Send is accepted. CI retains isolation, typography and language checks for source and packaged Electron, plus the actual Restricted-parent launcher regression.

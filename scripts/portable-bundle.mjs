@@ -14,9 +14,10 @@ export const supportFiles = [
 function portableReadme(version) {
   return `LocalCode ${version} — Windows x64
 
-RELEASE HOLD: the known application-data isolation issue remains unresolved.
-Previous validation artifacts are not recommended releases. Passing build or
-onboarding checks does not establish release readiness.
+RELEASE HOLD: the application-data isolation fix passed local regression.
+Clean Windows installation and a fresh default Ollama task plus computer reboot
+still await acceptance. Previous validation artifacts are not recommended releases.
+Passing local checks does not establish release readiness.
 
 OPEN THE PORTABLE DESKTOP
 1. Use Windows 11 x64 (Windows 10 22H2 x64 is an untested compatibility target).
@@ -78,8 +79,9 @@ another Windows account/computer. Never upload runtime data, keys or private
 conversations in a bug report. Read SECURITY.md before using important files.
 
 中文快速开始
-发布暂停：已知的应用数据隔离问题尚未解决；此前验证构建不作为推荐发行版。
-构建或首次配置检查通过，不代表已经满足发布条件。
+发布暂停：应用数据隔离修复已通过本机回归；此前验证构建不作为推荐发行版。
+干净 Windows 安装、全新默认 Ollama 真实任务及电脑重启验收仍未完成。
+本机检查通过，不代表已经满足发布条件。
 
 打开桌面
 1. 使用 Windows 11 x64；Windows 10 22H2 x64 属于未实测的兼容目标。
