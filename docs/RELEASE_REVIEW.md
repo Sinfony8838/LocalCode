@@ -12,6 +12,7 @@ Reviewed on 2026-10-25 (Asia/Shanghai), starting from `8c9d04cd54a51d53f203cc101
 | Portable allowlist regression | PASS; 3 passed, 1 Linux-only symlink negative control skipped on Windows |
 | Real Electron source isolation acceptance | PASS; project selection, file/browser/preview denial, journal ownership, normal history/checkpoint/undo, explicit data-folder opening |
 | Existing Electron checkpoint, model-setup and artifact acceptance | PASS with isolated homes and synthetic responses; not real-model capability evidence |
+| Packaged 0.1.15 EXE isolation/checkpoint/model-setup/artifact acceptance | PASS locally with isolated homes and synthetic responses; not a clean-machine or fresh-model result |
 | Production dependency audit | PASS locally; 0 reported vulnerabilities |
 | Real Ark Coding Plan cloud task acceptance | PASS in source Electron with `ark-code-latest` / Anthropic: user-entered isolated credential, save/test/select, file read/edit, approved test, denied command, cancellation and ten-second no-further-tools observation; 8 request attempts |
 | Clean non-administrator Windows installation | UNRUN; external tester's environment report and actual results required |

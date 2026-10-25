@@ -23,15 +23,25 @@ try {
     $kitName = "LocalCode-$version-acceptance"
     $kitFolder = Join-Path $destination $kitName
     New-Item -ItemType Directory -Path $kitFolder | Out-Null
-    foreach ($file in @(& git ls-files scripts/acceptance)) {
-        $relative = $file.Substring('scripts/acceptance/'.Length)
-        $target = Join-Path $kitFolder $relative
-        New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $file -Destination $target
-    }
+    # Read tracked files from the commit archive, preserving Unicode in Windows PowerShell 5.1.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($sourceZip)
+    try {
+        $prefix = "$sourceName/scripts/acceptance/"
+        foreach ($entry in $archive.Entries) {
+            if (-not $entry.FullName.StartsWith($prefix, [StringComparison]::Ordinal) -or -not $entry.Name) { continue }
+            $relative = $entry.FullName.Substring($prefix.Length)
+            $target = [IO.Path]::GetFullPath((Join-Path $kitFolder $relative))
+            if (-not $target.StartsWith($kitFolder + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid acceptance archive path.' }
+            New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $false)
+        }
+    } finally { $archive.Dispose() }
     # Plain text opens in Windows Notepad without a Markdown application.
-    $guide = Get-Content -LiteralPath 'scripts/acceptance/先看这里.md' -Raw -Encoding UTF8
-    $guide | Set-Content -LiteralPath (Join-Path $kitFolder '先看这里.txt') -Encoding UTF8
+    $guideFile = Get-ChildItem -LiteralPath $kitFolder -File -Filter '*.md' | Where-Object { $_.Name -ne 'README.zh-CN.md' } | Select-Object -First 1
+    if (-not $guideFile) { throw 'Missing beginner instructions.' }
+    $guide = Get-Content -LiteralPath $guideFile.FullName -Raw -Encoding UTF8
+    $guide | Set-Content -LiteralPath (Join-Path $kitFolder ([IO.Path]::ChangeExtension($guideFile.Name, '.txt'))) -Encoding UTF8
     $kitZip = Join-Path $destination ($kitName + '.zip')
     Compress-Archive -LiteralPath $kitFolder -DestinationPath $kitZip
     $artifacts = @($portableZip, $sourceZip, $kitZip) | ForEach-Object {
