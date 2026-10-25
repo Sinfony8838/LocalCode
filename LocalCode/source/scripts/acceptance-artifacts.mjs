@@ -4,6 +4,9 @@ import path from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 // Actual desktop + SDK tools; all inference is a local deterministic fixture.
 const root = path.resolve(`../evidence/artifacts-desktop-${Date.now()}`);
@@ -41,14 +44,29 @@ document.querySelector('#counter').addEventListener('click', () => { document.qu
 fetch('${baseUrl}/blocked-probe').then(() => document.body.dataset.network = 'unexpected').catch(() => document.body.dataset.network = 'blocked');
 `);
 const html = '<!doctype html>\n<html lang="zh"><head><meta charset="utf-8"><title>初稿</title><link rel="stylesheet" href="assets/style.css"></head><body><h1>内嵌交互网页</h1><p id="stage">初稿</p><img src="assets/pixel.svg" alt="Local fixture image"><button id="counter">点击计数 <span id="count">0</span></button><script>document.body.dataset.inline="ready";</script><script src="assets/app.js"></script></body></html>\n';
-const checks = [], errors = [], diagnostics = { console: [], requestsFailed: [], previewResponses: [], frameNavigations: [], failureFrames: [] };
+const checks = [], errors = [], diagnostics = { launches: [], console: [], requestsFailed: [], previewResponses: [], frameNavigations: [], failureFrames: [] };
 const executable = process.argv[2];
 const env = { ...process.env, LOCALCODE_HOME: root, LOCALCODE_SKIP_OLLAMA_START: '1', TEMP: path.resolve('../cache'), TMP: path.resolve('../cache') }; delete env.ELECTRON_RUN_AS_NODE;
 let app, page, projectId;
 async function poll(fn, label, ms = 60000) { const until = Date.now() + ms; while (Date.now() < until) { const value = await fn(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 80)); } throw new Error(`Timed out: ${label}`); }
 function gate() { let release; const promise = new Promise(resolve => { release = resolve; }); gates.push(release); return { promise, release }; }
 async function launch() {
-  app = await electron.launch({ executablePath: executable || process.env.LOCALCODE_ELECTRON_PATH || path.resolve('node_modules/electron/dist/electron.exe'), args: executable ? [] : [process.cwd()], env, timeout: 60000 });
+  const runtimeSource = executable ? 'packaged argument' : process.env.LOCALCODE_ELECTRON_PATH ? 'LOCALCODE_ELECTRON_PATH' : 'electron package export';
+  let runtimePath;
+  const args = executable ? [] : [process.cwd()];
+  try {
+    // Fresh CI checkouts do not run Setup.ps1, so create the requested temp path.
+    for (const directory of new Set([env.TEMP, env.TMP])) await fs.mkdir(directory, { recursive: true });
+    // Electron 45 downloads its runtime lazily from the package entry point.
+    // A hard-coded dist/electron.exe path bypasses that installation step.
+    runtimePath = executable || process.env.LOCALCODE_ELECTRON_PATH || require('electron');
+    if (typeof runtimePath !== 'string' || !(await fs.stat(runtimePath)).isFile()) throw new Error('Resolved Electron executable is not a file');
+    const launchDetails = { runtimeSource, executablePath: runtimePath, args, tempDir: env.TEMP, nodeVersion: process.version, platform: process.platform };
+    diagnostics.launches.push(launchDetails); console.log(JSON.stringify({ electronRuntime: launchDetails }));
+    app = await electron.launch({ executablePath: runtimePath, args, env, timeout: 60000 });
+  } catch (error) {
+    throw new Error(`Electron launch failed (${runtimeSource}; executable=${runtimePath || 'unresolved'}; TEMP=${env.TEMP}): ${error.message}`, { cause: error });
+  }
   await app.evaluate(({ shell }) => { globalThis.externalOpenCalls = []; shell.openExternal = async url => { globalThis.externalOpenCalls.push(url); }; });
   page = await poll(() => app.windows().find(p => /\/index\.html$/.test(p.url())), 'main window');
   page.on('pageerror', error => errors.push(error.stack));
