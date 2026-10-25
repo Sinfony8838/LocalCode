@@ -413,3 +413,23 @@ svg { flex-shrink: 0; }
   .provider-workspace { grid-template-columns: 170px minmax(0, 1fr); }
   .provider-detail { padding: 18px; }
 }
+
+/* Onboarding remains visible outside settings, without blocking cloud-only use. */
+.model-setup-banner { margin: 12px 24px 0; padding: 13px 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel); display: flex; align-items: center; gap: 16px; }
+.model-setup-banner > div { flex: 1; min-width: 0; }
+.model-setup-banner strong { font-size: .8125rem; }
+.model-setup-banner p { margin: 6px 0 0; font-size: .6875rem; color: var(--muted); line-height: 1.8; overflow-wrap: anywhere; }
+.model-setup-banner > button { flex-shrink: 0; font-size: .6875rem; }
+.local-model-discovery { display: grid; gap: 12px; }
+@media (max-width: 1100px) { .model-setup-banner { align-items: flex-start; flex-direction: column; gap: 10px; } }
+
+/* Native dialog supplies focus containment, Escape handling and inert background. */
+.checkpoint-dialog { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 12px; padding: 24px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.checkpoint-dialog::backdrop { background: #38212f66; backdrop-filter: blur(4px); }
+.checkpoint-dialog h2 { font-size: 1rem; margin: 0 0 14px; }
+.checkpoint-dialog p { font-size: .8rem; line-height: 1.7; }
+.checkpoint-path, .checkpoint-hash { overflow-wrap: anywhere; }
+.checkpoint-content { max-height: 40vh; min-height: 80px; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 6px; font-size: .75rem; line-height: 1.6; tab-size: 2; }
+.checkpoint-hash code { font-size: .7rem; }
+.checkpoint-error { color: var(--warning); }
+.checkpoint-preview-button { margin-top: 8px; display: block; }

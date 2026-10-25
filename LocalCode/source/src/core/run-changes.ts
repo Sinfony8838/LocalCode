@@ -70,6 +70,12 @@ export async function beginRunChanges(dataDir: string, sessionId: string, runId:
   await fs.writeFile(temporary, JSON.stringify(value), { flag: 'wx' });
   try { await fs.rename(temporary, file); } finally { await fs.unlink(temporary).catch(() => {}); }
 }
+/** Only the caller that durably saved the terminal summary may discard its baseline.
+ * The separate file-tool journal is deliberately retained for conflict-aware undo. */
+export async function discardRunChanges(dataDir: string, sessionId: string, runId: string): Promise<void> {
+  try { await fs.unlink(snapshotPath(dataDir, sessionId, runId)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+}
 function change(path: string, before: string | null, after: string | null, source: RunFileChange['source'], conflict = false): RunFileChange | undefined {
   if (before === after) return;
   const diff = diffLines(before ?? '', after ?? '', { timeout: 100, maxEditLength: 10000 });

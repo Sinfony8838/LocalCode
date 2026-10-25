@@ -8,6 +8,7 @@ import ModelSettings from './ModelSettings';
 import ModelPicker from './ModelPicker';
 import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
 import RunSummary from './RunSummary';
+import ChangeCheckpointDialog from './ChangeCheckpointDialog';
 import { reduceAgentEvent } from '../shared/session-events';
 import { providerModels } from '../shared/providers';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
@@ -21,7 +22,7 @@ import {
   Undo2, X, Brain,
 } from 'lucide-react';
 import type {
-  MessagePart, RunProgress, AgentEvent, AppSettings, Bootstrap, ChangeView, ChatMessage, FileEntry, FileView, RunSummary as RunSummaryRecord,
+  MessagePart, RunProgress, AgentEvent, AppSettings, Bootstrap, ChangeCheckpointPreview, ChangeView, ChatMessage, FileEntry, FileView, RunSummary as RunSummaryRecord,
   ModelHealth, Project, ProviderConfig, RunStatus, SessionView, Theme, ToolRecord,
 } from '../shared/contracts';
 
@@ -63,6 +64,11 @@ export default function App() {
   const [fileView, setFileView] = useState<FileView | null>(null);
   const [changes, setChanges] = useState<ChangeView[]>([]);
   const [changePath, setChangePath] = useState('');
+  const [checkpointPreview, setCheckpointPreview] = useState<(ChangeCheckpointPreview & { sessionId: string }) | null>(null);
+  const [checkpointPending, setCheckpointPending] = useState(false);
+  const [checkpointError, setCheckpointError] = useState('');
+  const checkpointRequest = useRef(0);
+  const checkpointLock = useRef(false);
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({});
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, boolean>>({});
   const [pendingStops, setPendingStops] = useState<Record<string, boolean>>({});
@@ -91,6 +97,7 @@ export default function App() {
   const backgroundSessions = sessions.filter(session => isBusy(session.status) && session.id !== activeSessionId);
   const busySession = backgroundSessions[0];
   const busy = isBusy(activeSession?.status);
+  const changesBusy = sessions.some(session => isBusy(session.status)) || Object.values(pendingActions).some(Boolean) || checkpointPending;
   const draftKey = activeSessionId || `project:${activeProjectId || 'none'}`;
   const actionPending = Boolean(pendingActions[draftKey]);
   const approvalPending = Boolean(pendingApprovals[activeSessionId]);
@@ -101,6 +108,9 @@ export default function App() {
   const requestedProviderId = providerId || providers[0]?.id;
   const choice = choices.find(c => c.provider.id === requestedProviderId && (!modelId || c.model.id === modelId));
   const provider = choice ? { ...choice.provider, model: choice.model.id, contextWindow: choice.model.contextWindow, maxTokens: choice.model.maxTokens } : undefined;
+  const cloudSelected = Boolean(provider && provider.kind !== 'ollama');
+  const cloudConfigured = choices.some(c => c.provider.kind !== 'ollama' && c.provider.hasKey);
+  const needsModelSetup = Boolean(boot && (cloudSelected ? !provider?.hasKey : !boot.health.modelAvailable));
   const selectedChange = changes.find(change => change.path === changePath) || changes[0];
 
   const putSession = useCallback((session: SessionView) => {
@@ -179,7 +189,15 @@ export default function App() {
     return () => { disposed = true; };
   }, [activeProjectId, directory, filesRevision]);
   useEffect(() => { if (inspectorOpen) artifacts.close(); }, [inspectorOpen]);
-  useEffect(() => { setChanges([]); setChangePath(''); setNotice(''); void refreshChanges(activeSessionId); }, [activeSessionId, refreshChanges]);
+  useEffect(() => {
+    setChanges([]); setChangePath(''); setNotice('');
+    void refreshChanges(activeSessionId);
+  }, [activeSessionId, refreshChanges]);
+  useEffect(() => {
+    // A delayed preview must not reopen after the user navigates away.
+    checkpointRequest.current++; checkpointLock.current = false;
+    setCheckpointPreview(null); setCheckpointError(''); setCheckpointPending(false);
+  }, [activeSessionId, activeProjectId, inspectorOpen, inspectorTab, changePath]);
   useEffect(() => {
     if (atBottom && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [activeSession?.messages, activeSession?.tools, activeSession?.approval, activeSession?.runs, atBottom]);
@@ -304,9 +322,32 @@ export default function App() {
     await artifacts.open(entry.path);
   };
   const undo = async (change: ChangeView) => {
-    if (!activeSession || busy || change.conflict) return;
+    if (!activeSession || changesBusy || change.conflict) return;
     try { await window.localcode.undo({ sessionId: activeSession.id, path: change.path }); await refreshChanges(); }
     catch (failure) { setError(errorText(failure)); await refreshChanges(); }
+  };
+  const previewCheckpoint = async (change: ChangeView) => {
+    if (!activeSession || changesBusy || !change.conflict || checkpointLock.current) return;
+    const sessionId = activeSession.id; const request = ++checkpointRequest.current;
+    checkpointLock.current = true; setCheckpointPending(true); setCheckpointError('');
+    try {
+      const preview = await window.localcode.previewCheckpoint({ sessionId, path: change.path });
+      if (request === checkpointRequest.current && activeSessionRef.current === sessionId) setCheckpointPreview({ ...preview, sessionId });
+    } catch (failure) { if (request === checkpointRequest.current) setError(errorText(failure)); }
+    finally { if (request === checkpointRequest.current) { checkpointLock.current = false; setCheckpointPending(false); } }
+  };
+  const confirmCheckpoint = async () => {
+    if (!checkpointPreview || changesBusy || checkpointLock.current || activeSessionId !== checkpointPreview.sessionId) return;
+    const preview = checkpointPreview; const request = ++checkpointRequest.current;
+    checkpointLock.current = true; setCheckpointPending(true); setCheckpointError('');
+    try {
+      await window.localcode.checkpoint({ sessionId: preview.sessionId, path: preview.path, expectedHash: preview.currentHash, expectedRecordHash: preview.recordHash });
+      if (request === checkpointRequest.current) {
+        setCheckpointPreview(null); setNotice('已保留当前文件内容作为新起点。旧修改已归档，可继续本会话。');
+        await refreshChanges(preview.sessionId);
+      }
+    } catch (failure) { if (request === checkpointRequest.current) setCheckpointError(errorText(failure)); }
+    finally { if (request === checkpointRequest.current) { checkpointLock.current = false; setCheckpointPending(false); } }
   };
   const renameSession = async () => {
     if (!renameId || !renameTitle.trim()) return;
@@ -351,7 +392,7 @@ export default function App() {
       </nav>
       {busySession && busySession.id !== activeSessionId && <button className="background-task" onClick={() => void openSession(busySession)}><LoaderCircle size={14} className="spin" /><span>{busySession.status === 'awaiting_approval' ? '有任务等待确认' : '有任务正在运行'}</span><ArrowUpRight size={13} /></button>}
       <div className="sidebar-footer">
-        <div className="local-health" title={boot?.health.message}><span className={`status-dot ${boot?.health.online && boot?.health.modelAvailable ? 'online' : 'offline'}`} /><span>{boot?.health.online ? boot.health.modelAvailable ? boot.health.gpuPercent === 0 ? 'CPU 运行 · 较慢' : '本地模型已就绪' : '模型尚未就绪' : 'Ollama 未连接'}</span><button className="icon-button" title="刷新连接" aria-label="刷新模型连接" onClick={() => void checkHealth()} disabled={healthPending}><RefreshCw size={13} className={healthPending ? 'spin' : ''} /></button></div>
+        <div className="local-health" title={cloudSelected ? '云端模型不依赖本地 Ollama；连通性请在设置中手动测试。' : boot?.health.message}><span className={`status-dot ${cloudSelected ? provider?.hasKey ? 'online' : 'offline' : boot?.health.online && boot?.health.modelAvailable ? 'online' : 'offline'}`} /><span>{cloudSelected ? '云端模式 · 无需 Ollama' : boot?.health.online ? boot.health.modelAvailable ? boot.health.gpuPercent === 0 ? 'CPU 运行 · 较慢' : '本地模型已就绪' : '模型尚未就绪' : 'Ollama 未连接'}</span><button className="icon-button" title="刷新连接" aria-label="刷新模型连接" onClick={() => void checkHealth()} disabled={healthPending}><RefreshCw size={13} className={healthPending ? 'spin' : ''} /></button></div>
       </div>
     </aside>
 
@@ -360,6 +401,7 @@ export default function App() {
         <div className="workspace-heading"><Folder size={16} /><h1 title={activeSession?.title || project?.path}>{activeSession?.title || project?.name || '新任务'}</h1></div>
         <div className="header-actions no-drag"><span className={`run-status ${activeSession?.status || 'idle'}`}><span className="status-dot" />{STATUS_LABELS[activeSession?.status || 'idle']}</span><button className="icon-button" title={inspectorOpen ? '收起文件面板' : '打开文件面板'} aria-label={inspectorOpen ? '收起文件面板' : '打开文件面板'} onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button></div>
       </header>
+      {needsModelSetup && <section className="model-setup-banner" aria-label="模型配置指引"><div><strong>{cloudSelected ? '还差一步：配置 API Key' : '开始前，选择一种模型方式'}</strong><p>{cloudSelected ? '在模型设置中保存密钥，然后选择云端模型。无需安装 Ollama 或下载本地模型。' : cloudConfigured ? '本地模型尚未就绪。你也可以直接在输入框下方选择已配置的云端模型，不受本地环境影响。' : '本地新安装：运行 Install-LocalModel.cmd（便携版）或 Setup.cmd（源码版）。已有 Ollama：在设置中选择已有服务。云端 API：只需地址、模型名和密钥。'}</p></div><button className="secondary-button" onClick={() => setSettingsOpen(true)}><Settings2 size={15} />配置模型与检查环境</button></section>}
       <div className="conversation" ref={scrollRef} onScroll={event => { const element = event.currentTarget; setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 100); }}>
         {(!activeSession || !activeSession.messages.length) ? <div className="welcome">
           <h2>{project ? '接下来，做点什么？' : '从一个想法开始'}</h2>
@@ -403,7 +445,7 @@ export default function App() {
         <div className="inspector-section-label"><span>本次会话</span><button className="icon-button" title="刷新文件差异" aria-label="刷新文件差异" onClick={() => void refreshChanges()}><RefreshCw size={13} /></button></div>
         {!changes.length ? <div className="panel-empty"><div className="panel-empty-icon"><GitCompareArrows size={27} strokeWidth={1.4} /></div><h3>修改会显示在这里</h3><p>Agent 编辑文件后，你可以查看差异，并撤销本次会话的修改。</p><span className="panel-footnote">不会自动提交到 Git</span></div> : <>
           <div className="change-files">{changes.map(change => <button key={change.path} className={`change-file ${selectedChange?.path === change.path ? 'active' : ''}`} onClick={() => setChangePath(change.path)} onContextMenu={event => void artifacts.showMenu(event, change.path)} title={change.path}>{change.created ? <FilePlus2 size={14} /> : <FileCode2 size={14} />}<span>{change.path}</span>{change.conflict ? <AlertCircle size={13} className="warning-text" /> : <span className={change.created ? 'change-mark added' : 'change-mark'}>{change.created ? 'A' : 'M'}</span>}</button>)}</div>
-          {selectedChange && <div className="diff-pane"><div className="diff-title"><span title={selectedChange.path}>{shortPath(selectedChange.path)}</span><button className="icon-button" aria-label="撤销此文件修改" title={selectedChange.conflict ? '文件有其他修改，不能直接撤销' : busy ? '任务结束后可撤销' : '撤销本会话对此文件的修改'} disabled={busy || selectedChange.conflict} onClick={() => void undo(selectedChange)}><Undo2 size={14} /></button></div>{selectedChange.conflict && <div className="conflict-note"><AlertCircle size={13} />文件已有其他修改，已保护当前内容，无法直接撤销。</div>}<DiffContent change={selectedChange} /></div>}
+          {selectedChange && <div className="diff-pane"><div className="diff-title"><span title={selectedChange.path}>{shortPath(selectedChange.path)}</span><button className="icon-button" aria-label="撤销此文件修改" title={selectedChange.conflict ? '文件有其他修改，不能直接撤销' : changesBusy ? '所有任务结束后可撤销' : '撤销本会话对此文件的修改'} disabled={changesBusy || selectedChange.conflict} onClick={() => void undo(selectedChange)}><Undo2 size={14} /></button></div>{selectedChange.conflict && <div className="conflict-note"><AlertCircle size={13} /><div>文件已有其他修改，已保护当前内容，无法直接撤销。<button className="secondary-button checkpoint-preview-button" disabled={changesBusy} title={changesBusy ? '请等待所有任务结束' : '检查当前内容后才能继续编辑'} onClick={() => void previewCheckpoint(selectedChange)}>预览并设为新起点</button></div></div>}<DiffContent change={selectedChange} /></div>}
         </>}
       </> : <>
         <div className="file-breadcrumb"><button className="icon-button" disabled={!directory && !fileView} aria-label="返回上级目录" title="返回目录" onClick={() => { if (fileView) setFileView(null); else setDirectory(directory.replace(/\\/g, '/').split('/').slice(0, -1).join('/')); }}><ArrowLeft size={14} /></button><span title={fileView?.path || directory || project?.path}>{fileView?.path || directory || project?.name || '项目文件'}</span></div>
@@ -414,6 +456,7 @@ export default function App() {
 
     {error && <div className="toast error-toast" role="alert"><AlertCircle size={18} /><div><strong>操作未完成</strong><p>{error}</p></div><button className="icon-button" title="关闭错误提示" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15} /></button></div>}
     {settingsOpen && boot && <SettingsDialog settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
+    {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>重命名会话</h2><label className="field"><span>会话名称</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>取消</button><button className="primary-button" disabled={!renameTitle.trim()}>保存</button></div></form></div>}
     <ArtifactPanel controller={artifacts} />
     <ArtifactMenu controller={artifacts} />
@@ -441,9 +484,9 @@ function Message({ message }: { message: ChatMessage }) {
 
 function MarkdownText({ text }: { text: string }) {
   return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} urlTransform={markdownUrl} skipHtml components={{
-    a: ({ children, href }) => href && (isFileReference(href) || !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(href)) ? <ArtifactLink path={href}>{children}</ArtifactLink> : href && /^https?:\/\//i.test(href) ? <ExternalWebLink href={href}>{children}</ExternalWebLink> : <span>{children}</span>,
-    code: ({ children, className, node }) => !className && node?.position?.start.line === node?.position?.end.line && typeof children === 'string' && isFileReference(children) ? <ArtifactLink path={children}><code>{children}</code></ArtifactLink> : <code className={className}>{children}</code>,
-    img: ({ alt, src }) => src && isFileReference(src) ? <ArtifactLink path={src}><FileCode2 size={14} />{alt || '查看图片'}</ArtifactLink> : <span className="image-placeholder">[图片：{alt || '未加载'}]</span>,
+    a: ({ children, href }) => href && (isFileReference(href) || !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(href)) ? <ArtifactLink path={href} inputKind="reference">{children}</ArtifactLink> : href && /^https?:\/\//i.test(href) ? <ExternalWebLink href={href}>{children}</ExternalWebLink> : <span>{children}</span>,
+    code: ({ children, className, node }) => !className && node?.position?.start.line === node?.position?.end.line && typeof children === 'string' && isFileReference(children) ? <ArtifactLink path={children} inputKind={/^file:/i.test(children) ? 'reference' : 'path'}><code>{children}</code></ArtifactLink> : <code className={className}>{children}</code>,
+    img: ({ alt, src }) => src && isFileReference(src) ? <ArtifactLink path={src} inputKind="reference"><FileCode2 size={14} />{alt || '查看图片'}</ArtifactLink> : <span className="image-placeholder">[图片：{alt || '未加载'}]</span>,
   }}>{text}</ReactMarkdown></div>;
 }
 function useClock(active: boolean) {

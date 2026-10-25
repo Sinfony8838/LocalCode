@@ -99,10 +99,27 @@ describe('durable UI index', () => {
     await store.saveProvider({ ...store.provider('mock'), name: 'Renamed' });
     expect(store.encryptedKey('mock')).toBe('encrypted-only');
     await store.saveProvider({ ...store.provider('local'), contextWindow: 4096, maxTokens: 512 });
-    expect(store.provider('local').contextWindow).toBe(8192);
+    expect(store.provider('local').contextWindow).toBe(4096);
     await fs.writeFile(path.join(root, 'model-profile.json'), JSON.stringify({ contextWindow: 4096, maxTokens: 512 }));
     const fresh = new Store(path.join(root, 'other')); await fresh.init();
     expect(fresh.provider('local').maxTokens).toBe(512);
+  });
+  it('edits local model and budgets without replacing history, keys or an in-flight provider snapshot', async () => {
+    const { store, s } = await setup();
+    await store.beginRun(s.id, 'keep this history', 'local', 'localcode-agent:latest');
+    const snapshot = { ...store.provider('local') };
+    await store.saveProvider({ ...store.provider('local'), model: 'small:latest', contextWindow: 4096, maxTokens: 512, baseUrl: 'http://localhost:11500/v1', ollamaMode: 'existing' });
+    expect(snapshot).toMatchObject({ model: 'localcode-agent:latest', contextWindow: 8192, baseUrl: 'http://127.0.0.1:11434/v1' });
+    const reopened = new Store(store.dataDir); await reopened.init();
+    expect(reopened.provider('local')).toMatchObject({ model: 'small:latest', contextWindow: 4096, maxTokens: 512, baseUrl: 'http://127.0.0.1:11500/v1', ollamaMode: 'existing', hasKey: false });
+    expect(reopened.session(s.id).messages[0].text).toBe('keep this history');
+    expect(reopened.session(s.id).modelId).toBe('localcode-agent:latest');
+    for (const patch of [{ baseUrl: 'https://example.com/v1' }, { baseUrl: 'http://127.0.0.1:11500/v1', ollamaMode: 'managed' as const }, { contextWindow: 4096, maxTokens: 4096 }]) {
+      await expect(reopened.saveProvider({ ...reopened.provider('local'), ...patch })).rejects.toThrow();
+    }
+    expect(reopened.provider('local').model).toBe('small:latest');
+    await expect(reopened.saveProvider({ ...reopened.provider('local') }, 'encrypted-unwanted')).rejects.toThrow('不保存');
+    expect(reopened.encryptedKey('local')).toBeUndefined();
   });
   it('preserves a corrupt index instead of silently replacing user history', async () => {
     const { store } = await setup(); await fs.writeFile(store.indexFile, '{damaged');

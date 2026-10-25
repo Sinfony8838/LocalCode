@@ -113,7 +113,7 @@ describe('AgentEngine lifecycle and approval fencing', () => {
     expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('参数') });
   });
 
-  it('stops at twelve calls and preserves stable assistant message IDs', async () => {
+  it('allows exactly one final text response after twelve calls and preserves stable message IDs', async () => {
     const f = fakeEngine(); const done = f.engine.handle(await request());
     await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
     const session = f.sessions[0];
@@ -126,12 +126,57 @@ describe('AgentEngine lifecycle and approval fencing', () => {
       session.emit({ type: 'tool_execution_end', toolCallId: `tool${i}`, toolName: 'read_file', isError: false,
         result: { content: [{ type: 'text', text: 'budget' }], details: { fullOutput: 'complete output' } } });
     }
-    await done;
+    expect(f.events.some(event => event.type === 'settled')).toBe(false);
+    expect(() => f.contexts[0].beforeTool('write_file', {})).toThrow(/上限/);
+    expect(f.contexts[0].beforeModelRequest?.()).toBe(true);
+    session.emit({ type: 'message_start', message: { role: 'assistant' } });
+    session.emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '已读取文件，尚未修改或验证。' }], stopReason: 'stop' } });
+    session.settle(); await done;
     const messages = f.events.filter(event => 'messageId' in event);
-    expect(new Set(messages.map(event => 'messageId' in event && event.messageId)).size).toBe(1);
+    expect(new Set(messages.map(event => 'messageId' in event && event.messageId)).size).toBe(2);
+    expect(f.events.filter(event => event.type === 'message_end')).toEqual([
+      expect.objectContaining({ messageId: 'run1:assistant:1', text: '你好' }),
+      expect.objectContaining({ messageId: 'run1:assistant:2', text: '已读取文件，尚未修改或验证。' }),
+    ]);
     expect(f.events.find(event => event.type === 'tool_result')).toMatchObject({ result: 'complete output' });
-    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('12') });
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('预算已耗尽') });
     expect(() => f.contexts[0].beforeTool('read_file', {})).toThrow();
+  });
+
+  it.each(['extra request', 'extra tool', 'user cancellation'] as const)('keeps the summary phase bounded for %s', async action => {
+    const f = fakeEngine(); const done = f.engine.handle(await request());
+    await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    const session = f.sessions[0];
+    for (let i = 0; i < 12; i++) {
+      session.emit({ type: 'tool_execution_start', toolCallId: `tool${i}`, toolName: 'read_file', args: {} });
+      f.contexts[0].beforeTool('read_file', {});
+      session.emit({ type: 'tool_execution_end', toolCallId: `tool${i}`, toolName: 'read_file', isError: false, result: { content: [] } });
+    }
+    expect(f.contexts[0].beforeModelRequest?.()).toBe(true);
+    if (action === 'extra request') expect(() => f.contexts[0].beforeModelRequest?.()).toThrow(/预算已耗尽/);
+    else if (action === 'extra tool') {
+      session.emit({ type: 'tool_execution_start', toolCallId: 'forbidden', toolName: 'write_file', args: {} });
+      expect(() => f.contexts[0].beforeTool('write_file', {})).toThrow();
+    } else await f.engine.abort();
+    await done;
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: action === 'user cancellation' ? 'interrupted' : 'failed' });
+    expect(f.sessions[0].queueCleared).toBe(true);
+  });
+
+  it.each(['excess compaction', 'compaction after final'] as const)('bounds hidden final-phase requests: %s', async action => {
+    const f = fakeEngine(); const done = f.engine.handle(await request());
+    await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    for (let i = 0; i < 12; i++) {
+      f.sessions[0].emit({ type: 'tool_execution_start', toolCallId: `tool${i}`, toolName: 'read_file', args: {} });
+      f.contexts[0].beforeTool('read_file', {});
+      f.sessions[0].emit({ type: 'tool_execution_end', toolCallId: `tool${i}`, toolName: 'read_file', isError: false, result: { content: [] } });
+    }
+    expect(f.contexts[0].beforeModelRequest?.('compaction')).toBe(false);
+    expect(f.contexts[0].beforeModelRequest?.('compaction')).toBe(false);
+    if (action === 'compaction after final') expect(f.contexts[0].beforeModelRequest?.('assistant')).toBe(true);
+    expect(() => f.contexts[0].beforeModelRequest?.('compaction')).toThrow(/收尾上下文整理/);
+    await done;
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'failed' });
   });
 });
 
@@ -146,6 +191,49 @@ describe('session boundary', () => {
 });
 
 async function closeServer(server: Server) { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+it.each(['text', 'forbidden tool'] as const)('uses real pi to offer one tool-disabled final response after call twelve: %s', async finalResponse => {
+  const req = await request();
+  const payloads: Record<string, unknown>[] = [];
+  const server = createServer(async (incoming, response) => {
+    let body = ''; for await (const chunk of incoming) body += chunk;
+    payloads.push(JSON.parse(body));
+    const index = payloads.length;
+    const tool = index <= 12 || finalResponse === 'forbidden tool';
+    const delta = tool ? { role: 'assistant', tool_calls: [{ index: 0, id: `budget-${index}`, type: 'function', function: {
+      name: 'write_file', arguments: JSON.stringify({ path: index <= 12 ? 'budget.txt' : 'forbidden.txt', content: `write ${index}` }),
+    } }] } : { role: 'assistant', content: '已修改 budget.txt；未运行测试，仍需验证。' };
+    response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ id: `budget-${index}`, object: 'chat.completion.chunk', model: 'mock-model', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id: `budget-${index}`, object: 'chat.completion.chunk', model: 'mock-model', choices: [{ index: 0, delta: {}, finish_reason: tool ? 'tool_calls' : 'stop' }] })}\n\n`);
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing local server');
+  req.provider.baseUrl = `http://127.0.0.1:${address.port}/v1`;
+  const events: AgentEvent[] = []; const engine = new AgentEngine(event => events.push(event));
+  try {
+    await engine.handle(req);
+    expect(payloads).toHaveLength(13);
+    expect(payloads[11].tools).toBeDefined();
+    expect(payloads[12].tools ?? []).toEqual([]);
+    expect(JSON.stringify(payloads[12].messages)).toContain('禁止再调用任何工具');
+    expect(await readFile(path.join(req.projectPath, 'budget.txt'), 'utf8')).toBe('write 12');
+    await expect(readFile(path.join(req.projectPath, 'forbidden.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(events.filter(event => event.type === 'tool_result' && !event.isError)).toHaveLength(12);
+    if (finalResponse === 'text') expect(events.find(event => event.type === 'message_end' && event.text.includes('未运行测试'))).toBeDefined();
+    expect(events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('预算已耗尽') });
+    if (finalResponse === 'text') {
+      const saved = events.find(event => event.type === 'session_file');
+      if (saved?.type !== 'session_file') throw new Error('Missing saved session');
+      await engine.handle({ ...req, runId: 'after-budget', piFile: saved.file, prompt: '继续检查' });
+      expect(payloads).toHaveLength(14);
+      expect(payloads[13].tools).toBeDefined();
+      expect(JSON.stringify(payloads[13].messages)).not.toContain('禁止再调用任何工具');
+      expect(events.at(-1)).toMatchObject({ type: 'settled', status: 'completed', runId: 'after-budget' });
+    }
+  } finally { await engine.shutdown(); await closeServer(server); }
+}, 30_000);
+
 it('uses real pi against a local mock API: streams, strictly validates tools, persists and resumes without storing keys', async () => {
   const req = await request(); await writeFile(path.join(req.projectPath, 'hello.txt'), '原有内容\n');
   await writeFile(path.join(req.projectPath, 'AGENTS.md'), 'AUTO_RESOURCE_SHOULD_NOT_LOAD');
@@ -196,6 +284,49 @@ it('uses real pi against a local mock API: streams, strictly validates tools, pe
     expect(JSON.stringify(payloads[3].messages)).toContain('原有内容');
     expect(payloads[3]).not.toHaveProperty('reasoning_effort');
     expect((await readdir(path.dirname(saved.file))).filter(file => file.endsWith('.jsonl'))).toHaveLength(1);
+  } finally { await engine.shutdown(); await closeServer(server); }
+}, 30_000);
+
+it('keeps threshold compaction separate from the one visible final summary after tool twelve', async () => {
+  const req = await request('budget-compaction');
+  const payloads: Record<string, unknown>[] = []; const compactions: Record<string, unknown>[] = [];
+  let assistantRequests = 0;
+  const server = createServer(async (incoming, response) => {
+    let body = ''; for await (const chunk of incoming) body += chunk;
+    const payload = JSON.parse(body); payloads.push(payload);
+    const compacting = (payload.messages as { role: string; content: string }[]).some(message => message.role === 'system' && message.content.startsWith('You are a context summarization assistant.'));
+    if (compacting) compactions.push(payload); else assistantRequests++;
+    const tool = !compacting && assistantRequests <= 12;
+    const delta = tool ? { role: 'assistant', tool_calls: [{ index: 0, id: `compact-${assistantRequests}`, type: 'function', function: {
+      name: 'write_file', arguments: JSON.stringify({ path: 'compacted.txt', content: `write ${assistantRequests}\n${'x'.repeat(1400)}` }),
+    } }] } : { role: 'assistant', content: compacting ? 'Context checkpoint: compacted.txt was edited. Testing has not run.' : '可见最终总结：文件已修改，测试尚未运行。' };
+    response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ id: `compact-${payloads.length}`, object: 'chat.completion.chunk', model: 'mock-model', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+    const inputTokens = !compacting && (assistantRequests === 12 || assistantRequests === 14) ? 7000 : 100;
+    response.write(`data: ${JSON.stringify({ id: `compact-${payloads.length}`, object: 'chat.completion.chunk', model: 'mock-model', choices: [{ index: 0, delta: {}, finish_reason: tool ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: inputTokens, completion_tokens: 20, total_tokens: inputTokens + 20 } })}\n\n`);
+    response.end('data: [DONE]\n\n');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing local server');
+  req.provider.baseUrl = `http://127.0.0.1:${address.port}/v1`;
+  const events: AgentEvent[] = []; const engine = new AgentEngine(event => events.push(event));
+  try {
+    await engine.handle(req);
+    expect(compactions.length).toBeGreaterThan(0);
+    expect(compactions.length).toBeLessThanOrEqual(2);
+    for (const payload of compactions) expect(payload.tools ?? []).toEqual([]);
+    expect(assistantRequests).toBe(13);
+    expect(events.filter(event => event.type === 'message_end' && event.text.includes('可见最终总结'))).toHaveLength(1);
+    expect(JSON.stringify(compactions)).not.toContain('禁止再调用任何工具');
+    expect(payloads.at(-1)?.tools ?? []).toEqual([]);
+    expect(events.filter(event => event.type === 'tool_result' && !event.isError)).toHaveLength(12);
+    expect(events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('预算已耗尽') });
+    const saved = events.find(event => event.type === 'session_file');
+    if (saved?.type !== 'session_file') throw new Error('Missing saved session');
+    const firstCompactions = compactions.length;
+    await engine.handle({ ...req, runId: 'compaction-restored', piFile: saved.file, prompt: `继续处理，恢复正常上下文压缩。${'r'.repeat(10000)}` });
+    expect(compactions.length).toBeGreaterThan(firstCompactions);
+    expect(events.at(-1)).toMatchObject({ type: 'settled', status: 'completed', runId: 'compaction-restored' });
   } finally { await engine.shutdown(); await closeServer(server); }
 }, 30_000);
 

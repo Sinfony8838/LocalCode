@@ -114,7 +114,8 @@ try {
   assert.equal(await summaries().count(), 0, 'Completed tools must not create completion summaries before final settled');
   finalGate.release(); await terminal(id);
   await runCard(firstRun).waitFor(); assert.equal(await summaries().count(), 1);
-  assert.match(await runCard(firstRun).innerText(), /本轮已完成/);
+  assert.match(await runCard(firstRun).innerText(), /本轮运行结束/);
+  assert.match(await runCard(firstRun).innerText(), /不代表测试或任务验收通过/);
   assert.match(await runCard(firstRun).innerText(), /2\s*个文件/);
   assert.match(await runCard(firstRun).innerText(), /demo\.html/); assert.match(await runCard(firstRun).innerText(), /notes\.txt/);
   checks.push('Copyable intermediate messages and completed tools produce no summary; one settled run creates one summary and deduplicates three writes into two files');
@@ -192,13 +193,54 @@ try {
   assert(!(await runCard(secondRun).innerText()).includes('demo.html')); assert.match(await runCard(firstRun).innerText(), /2\s*个文件/);
   checks.push('Second round displays only its own one modified file; first-round two-file summary remains in history');
 
+  // Both names must exist: a fallback-to-existing-path resolver would hide this bug.
+  await fs.writeFile(path.join(project, 'report final.html'), '<p id="percent-name">space file</p>');
+  await fs.writeFile(path.join(project, 'assets/percent%20style.css'), 'body { color: rgb(1, 2, 3); }');
+  await fs.writeFile(path.join(project, 'assets/percent style.css'), 'body { color: rgb(4, 5, 6); }');
+  const percentHtml = '<!doctype html><link rel="stylesheet" href="assets/percent%2520style.css"><p id="percent-name">literal percent file</p>';
+  queue.push(
+    { tool: { name: 'write_file', args: { path: 'report%20final.html', content: percentHtml } } },
+    { text: '已写入 `report%20final.html`。\n\n[百分号文件](report%2520final.html) · [空格文件](report%20final.html)\n\n![图片目标链接](report%2520final.html)' },
+  );
+  const percentId = await newSession('ARTIFACT_LITERAL_PERCENT'); await terminal(percentId);
+  const percentRun = (await state(percentId)).runId;
+  const percentFrame = page.frameLocator('iframe[title="文件预览"]');
+  const assertPercentPreview = async expected => {
+    await poll(async () => await percentFrame.locator('#percent-name').innerText() === expected, expected);
+    if (expected === 'literal percent file') await poll(async () => await percentFrame.locator('body').evaluate(element => getComputedStyle(element).color) === 'rgb(1, 2, 3)', 'literal percent stylesheet');
+  };
+  for (const link of [
+    runCard(percentRun).getByRole('link', { name: '打开文件 report%20final.html', exact: true }),
+    page.locator('.tool-file-action').getByRole('link', { name: '打开文件 report%20final.html', exact: true }),
+    page.locator('.markdown-body').getByRole('link', { name: 'report%20final.html', exact: true }),
+    page.getByRole('link', { name: '百分号文件', exact: true }),
+    page.getByRole('link', { name: '图片目标链接', exact: true }),
+  ]) {
+    await link.click(); await assertPercentPreview('literal percent file');
+  }
+  await page.getByRole('button', { name: '源码', exact: true }).click();
+  await poll(async () => await page.locator('.artifact-source').innerText() === percentHtml, 'literal percent source');
+  await page.getByRole('button', { name: '刷新文件预览', exact: true }).click();
+  await poll(async () => await page.locator('.artifact-source').innerText() === percentHtml, 'literal percent refresh');
+  await page.getByRole('link', { name: '百分号文件', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '复制完整路径', exact: true }).click();
+  assert.equal((await app.evaluate(({ clipboard }) => clipboard.readText())).toLowerCase(), path.join(project, 'report%20final.html').toLowerCase());
+  await page.getByRole('link', { name: '空格文件', exact: true }).click(); await assertPercentPreview('space file');
+  await page.getByRole('button', { name: '打开文件面板', exact: true }).click();
+  await page.locator('.inspector-tabs').getByRole('button', { name: '文件', exact: true }).click();
+  await page.locator('.file-entry[title="report%20final.html"]').click(); await assertPercentPreview('literal percent file');
+  await page.getByRole('button', { name: '关闭文件预览', exact: true }).click();
+  await assert.rejects(fs.access(path.join(root, 'data/changes', percentId, 'runs', `${percentRun}.json`)), { code: 'ENOENT' });
+  await fs.access(path.join(root, 'data/changes', percentId, 'index.json'));
+  checks.push('Coexisting literal-percent and space filenames stay distinct through summaries, tools, inline code, Markdown links/images, source, refresh, menu and file browser; HTML assets decode once; settled snapshot is removed but undo journal retained');
+
   const interruptedGate = gate(); queue.push({ text: '尚未完成，仍在生成。'.repeat(16), streamGate: interruptedGate.promise });
   const interruptedId = await newSession('ARTIFACT_INTERRUPTED');
   await page.locator('.assistant-message').filter({ hasText: '尚未完成，仍在生成。' }).waitFor(); assert.equal(await summaries().count(), 0);
   await page.getByRole('button', { name: '停止任务', exact: true }).click(); await terminal(interruptedId, 'interrupted');
-  await summaries().waitFor(); assert(!(await summaries().innerText()).includes('本轮已完成')); interruptedGate.release();
+  await summaries().waitFor(); assert(!(await summaries().innerText()).includes('本轮运行结束')); interruptedGate.release();
   queue.push({ error: 401 }); const failedId = await newSession('ARTIFACT_FAILED'); await terminal(failedId, 'failed');
-  await summaries().waitFor(); assert(!(await summaries().innerText()).includes('本轮已完成'));
+  await summaries().waitFor(); assert(!(await summaries().innerText()).includes('本轮运行结束'));
   checks.push('User stop and provider failure keep explicit interrupted/failed summaries and never show completed');
 
   await select(id);

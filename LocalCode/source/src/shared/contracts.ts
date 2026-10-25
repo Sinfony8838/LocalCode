@@ -1,4 +1,4 @@
-import type { ArtifactInfo, ArtifactAction } from './artifacts';
+import type { ArtifactInfo, ArtifactAction, ArtifactInputKind } from './artifacts';
 export type RunStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'interrupted';
 export type Theme = 'light' | 'dark';
 export const DEFAULT_FONT_SIZE = 14;
@@ -14,12 +14,14 @@ export interface ToolRecord { id: string; runId: string; name: string; args: unk
 export interface Approval { id: string; runId: string; sessionId: string; command: string; cwd: string }
 export interface SessionView { id: string; projectId: string; title: string; createdAt: string; updatedAt: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress }
 export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean }
-export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[] }
+export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; ollamaMode?: 'managed' | 'existing' }
 export interface ProviderSecret extends ProviderConfig { apiKey: string }
 export interface AppSettings { theme: Theme; fontSize: number; defaultProviderId: string; providers: ProviderConfig[] }
-export interface ModelHealth { online: boolean; modelAvailable: boolean; model: string; contextWindow: number; version?: string; gpuPercent?: number; message?: string }
+export interface LocalModelProbe { baseUrl: string; model: string; contextWindow: number; ollamaMode?: 'managed' | 'existing' }
+export interface ModelHealth { status?: 'ready' | 'offline' | 'missing_model' | 'invalid_response' | 'invalid_config' | 'unverified_service' | 'missing_runtime'; installedModels?: string[]; online: boolean; modelAvailable: boolean; model: string; contextWindow: number; version?: string; gpuPercent?: number; message?: string }
 export interface FileEntry { path: string; name: string; directory: boolean }
 export interface FileView { path: string; content: string; truncated: boolean }
+export interface ChangeCheckpointPreview { path: string; content: string; currentHash: string; recordHash: string; byteLength: number }
 export interface ChangeView { path: string; before: string; after: string; created: boolean; conflict: boolean; runId: string }
 export interface Bootstrap { projects: Project[]; sessions: SessionView[]; settings: AppSettings; health: ModelHealth; version: string }
 export type AgentEvent = { runId: string; sessionId: string; recordedAt?: string } & (
@@ -58,9 +60,11 @@ export interface LocalCodeApi {
  approve(input: {runId: string; approvalId: string; allow: boolean}): Promise<void>;
  listFiles(input: {projectId: string; directory?: string}): Promise<FileEntry[]>;
  readFile(input: {projectId: string; path: string}): Promise<FileView>;
- artifactInfo(input: {projectId: string; path: string}): Promise<ArtifactInfo>;
- artifactAction(input: {projectId: string; path: string; action: ArtifactAction}): Promise<void>;
+ artifactInfo(input: {projectId: string; path: string; inputKind?: ArtifactInputKind}): Promise<ArtifactInfo>;
+ artifactAction(input: {projectId: string; path: string; action: ArtifactAction; inputKind?: ArtifactInputKind}): Promise<void>;
  changes(sessionId: string): Promise<ChangeView[]>;
+ previewCheckpoint(input: {sessionId: string; path: string}): Promise<ChangeCheckpointPreview>;
+ checkpoint(input: {sessionId: string; path: string; expectedHash: string; expectedRecordHash: string}): Promise<void>;
  undo(input: {sessionId: string; path: string}): Promise<void>;
  saveProvider(input: Omit<ProviderConfig, 'hasKey'> & {apiKey?: string}): Promise<ProviderConfig>;
  deleteProvider(providerId: string): Promise<void>;
@@ -68,6 +72,8 @@ export interface LocalCodeApi {
  setTheme(theme: Theme): Promise<void>;
  setFontSize(fontSize: number): Promise<void>;
  health(): Promise<ModelHealth>;
+ inspectLocalModel(input: LocalModelProbe): Promise<ModelHealth>;
+ startLocalService(): Promise<ModelHealth>;
  openDataFolder(): Promise<void>;
  onEvent(listener: (event: AppEvent) => void): () => void;
 }

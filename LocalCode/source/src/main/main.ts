@@ -1,29 +1,30 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, screen, shell, utilityProcess, type UtilityProcess } from 'electron';
 import fs from 'node:fs/promises';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { Store } from './store';
+import { prepareStartupStorage, STARTUP_STORAGE_ERROR, LOG_STORAGE_ERROR } from './startup-storage';
 import { RequestScheduler } from './request-scheduler';
 import { ArtifactController } from './artifacts';
 import { PREVIEW_SCHEME, externalBrowserUrl } from '../core/artifacts';
 import { createHash } from 'node:crypto';
+import { inspectLocalModel, localModelProbeSchema } from './local-model-health';
+import { managedOllamaState, startManagedOllama } from './managed-ollama';
 import { providerSchema, testConnection } from './providers';
 import { selectProviderModel } from '../shared/providers';
 import { PetController } from './pets';
-import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange } from '../core/workspace';
+import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange, previewChangeCheckpoint, checkpointChange } from '../core/workspace';
 import { cleanupOwnedCommands } from '../core/command';
 import type { AgentEvent, AppEvent, ModelHealth, ProviderSecret, WorkerCommand, TransportMessage, TransportGrant } from '../shared/contracts';
 
+function initializeApplication() {
 const home = path.resolve(process.env.LOCALCODE_HOME || app.getPath('userData'));
-const dataDir = path.join(home, 'data');
-const cacheDir = path.join(home, 'cache');
-for (const folder of [dataDir, cacheDir, path.join(home, 'logs'), path.join(dataDir, 'electron'), path.join(cacheDir, 'chromium')]) mkdirSync(folder, { recursive: true });
+const { dataDir, cacheDir, logsDir, logPath, logFd } = prepareStartupStorage(home);
 app.setPath('userData', path.join(dataDir, 'electron'));
 app.setPath('sessionData', path.join(cacheDir, 'chromium'));
 app.setPath('crashDumps', path.join(cacheDir, 'crashes'));
-app.setAppLogsPath(path.join(home, 'logs'));
+app.setAppLogsPath(logsDir);
 process.env.TEMP = cacheDir; process.env.TMP = cacheDir;
 protocol.registerSchemesAsPrivileged([
   { scheme: 'localcode', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -44,11 +45,20 @@ let quitReady = false;
 let eventQueue = Promise.resolve();
 const stopping = new Map<string, Promise<void>>();
 let cleanupQueue = Promise.resolve();
+let changingFiles = false;
+let localServiceStart: Promise<ModelHealth> | undefined;
 function cleanupCommands(workerPid?: number) {
   cleanupQueue = cleanupQueue.catch(() => {}).then(() => cleanupOwnedCommands(dataDir, workerPid));
   return cleanupQueue;
 }
-const log = createWriteStream(path.join(home, 'logs', 'desktop.log'), { flags: 'a' });
+const log = createWriteStream(logPath, { fd: logFd, flags: 'a', autoClose: true });
+let logErrorShown = false;
+log.on('error', () => {
+  if (logErrorShown) return;
+  logErrorShown = true;
+  // A later logging failure must not become an uncaught error or kill an active task.
+  try { dialog.showErrorBox('LocalCode 日志不可写', LOG_STORAGE_ERROR); } catch { /* Preserve active work even if the native dialog is unavailable. */ }
+});
 const id = z.string().uuid();
 const providerId = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
 const relPath = z.string().min(1).max(2048);
@@ -57,29 +67,7 @@ const post = (run: ActiveRun, command: WorkerCommand) => run.child.postMessage(c
 
 async function health(): Promise<ModelHealth> {
   const local = store.provider('local');
-  try {
-    const [v, tags, ps] = await Promise.all([
-      fetch('http://127.0.0.1:11434/api/version', { signal: AbortSignal.timeout(4000) }).then(r => r.json()),
-      fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(4000) }).then(r => r.json()),
-      fetch('http://127.0.0.1:11434/api/ps', { signal: AbortSignal.timeout(4000) }).then(r => r.json()),
-    ]);
-    const found = tags.models?.some((m: any) => m.name === local.model);
-    const loaded = ps.models?.find((m: any) => m.name === local.model);
-    const gpuPercent = loaded?.size > 0 ? Math.round(loaded.size_vram / loaded.size * 100) : undefined;
-    return { online: true, modelAvailable: !!found, model: local.model, contextWindow: local.contextWindow, version: v.version, gpuPercent,
-      message: !found ? '本地 Agent 模型尚未就绪。请检查部署记录。' : gpuPercent === 0 ? '当前模型以 CPU 运行，响应会明显变慢。请检查独立显卡和显卡模式。' : undefined };
-  } catch { return { online: false, modelAvailable: false, model: local.model, contextWindow: local.contextWindow, message: 'Ollama 未连接。请运行项目中的 Ollama/Start.cmd 后重试。' }; }
-}
-async function startOllamaIfNeeded() {
-  if (process.env.LOCALCODE_SKIP_OLLAMA_START === '1' || (await health()).online) return;
-  const start = process.env.LOCALCODE_OLLAMA_START || path.resolve(home, '../Ollama/Start.ps1');
-  try {
-    await fs.access(start);
-    const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const child = spawn(executable, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', start], { windowsHide: true, stdio: 'ignore', cwd: path.dirname(start) });
-    child.on('error', error => log.write(`Ollama start: ${error.message}\n`));
-    child.unref();
-  } catch (e: any) { log.write(`Ollama unavailable: ${e.message}\n`); }
+  return inspectLocalModel({ baseUrl: local.baseUrl, model: local.model, contextWindow: local.contextWindow, ollamaMode: local.ollamaMode }, { managedState: () => managedOllamaState(home) });
 }
 async function processEvent(raw: AgentEvent) {
   const active = runs.get(raw.sessionId);
@@ -177,15 +165,21 @@ const schemas: Record<string, z.ZodType> = {
   send: z.object({ sessionId: id, prompt: z.string().trim().min(1).max(30000), providerId, modelId: z.string().min(1).max(200).optional() }).strict(), stop: id,
   approve: z.object({ runId: id, approvalId: z.string().min(1).max(200), allow: z.boolean() }).strict(),
   listFiles: z.object({ projectId: id, directory: z.string().max(2048).optional() }).strict(), readFile: z.object({ projectId: id, path: relPath }).strict(),
-  artifactInfo: z.object({ projectId: id, path: z.string().min(1).max(4096) }).strict(),
-  artifactAction: z.object({ projectId: id, path: z.string().min(1).max(4096), action: z.enum(['open', 'choose-app', 'reveal', 'copy-path']) }).strict(),
+  artifactInfo: z.object({ projectId: id, path: z.string().min(1).max(4096), inputKind: z.enum(['path', 'reference']).optional() }).strict(),
+  artifactAction: z.object({ projectId: id, path: z.string().min(1).max(4096), action: z.enum(['open', 'choose-app', 'reveal', 'copy-path']), inputKind: z.enum(['path', 'reference']).optional() }).strict(),
   openExternal: z.string().min(1).max(4096),
   changes: id, undo: z.object({ sessionId: id, path: relPath }).strict(),
+  previewCheckpoint: z.object({ sessionId: id, path: relPath }).strict(),
+  checkpoint: z.object({ sessionId: id, path: relPath, expectedHash: z.string().regex(/^[a-f0-9]{64}$/), expectedRecordHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   saveProvider: providerSchema,
+  inspectLocalModel: localModelProbeSchema, startLocalService: z.undefined(),
   deleteProvider: providerId,
   testProvider: z.object({ providerId, modelId: z.string().min(1).max(200).optional() }).strict(),
   setTheme: z.enum(['light', 'dark']), setFontSize: z.number().int().min(12).max(20), health: z.undefined(), openDataFolder: z.undefined(),
 };
+function assertChangesIdle() {
+  if (runs.size || starting.size || recovering.size || changingFiles) throw new Error('请等待所有任务及恢复操作结束，再撤销文件修改或确认新起点。');
+}
 async function invoke(method: string, arg: any) {
   switch (method) {
     case 'bootstrap': { const currentHealth = await health(); await eventQueue; return { projects: store.projects(), sessions: store.sessions(), settings: store.settings(), health: currentHealth, version: app.getVersion() }; }
@@ -194,6 +188,7 @@ async function invoke(method: string, arg: any) {
     case 'openSession': await eventQueue; return structuredClone(store.session(arg));
     case 'renameSession': return store.renameSession(arg.sessionId, arg.title);
     case 'send': {
+      if (changingFiles) throw new Error('正在保存文件修改记录，请稍后再开始任务。');
       if (quitting || runs.has(arg.sessionId) || starting.has(arg.sessionId)) throw new Error('此会话已有任务运行中，请先停止或等待完成。');
       const startup = { cancelled: false };
       starting.set(arg.sessionId, startup);
@@ -230,12 +225,24 @@ async function invoke(method: string, arg: any) {
     case 'approve': { const active = [...runs.values()].find(run => run.runId === arg.runId); if (!active) throw new Error('审批已失效，命令未执行。'); const approval = store.session(active.sessionId).approval; if (!approval || approval.id !== arg.approvalId || approval.runId !== arg.runId) throw new Error('审批不匹配或已失效。'); post(active, { type: 'approve', ...arg }); return; }
     case 'listFiles': return listWorkspaceFiles(store.project(arg.projectId).path, arg.directory || '');
     case 'readFile': return readWorkspaceFile(store.project(arg.projectId).path, arg.path);
-    case 'artifactInfo': return artifacts.info(store.project(arg.projectId).path, arg.path);
-    case 'artifactAction': return artifacts.action(store.project(arg.projectId).path, arg.path, arg.action);
+    case 'artifactInfo': return artifacts.info(store.project(arg.projectId).path, arg.path, arg.inputKind);
+    case 'artifactAction': return artifacts.action(store.project(arg.projectId).path, arg.path, arg.action, arg.inputKind);
     case 'openExternal': await shell.openExternal(externalBrowserUrl(arg)); return;
     case 'changes': store.session(arg); return getChanges(dataDir, arg);
-    case 'undo': if (runs.size || starting.size) throw new Error('请先停止运行中的任务，再撤销文件修改。'); store.session(arg.sessionId); await undoChange(dataDir, arg.sessionId, arg.path); emit({ type: 'state_changed' }); return;
-    case 'saveProvider': { if (runs.size || starting.size) throw new Error('任务运行时不能修改模型配置。'); const { apiKey, ...publicData } = arg; let cipher: string | undefined; if (apiKey) { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 密钥加密暂不可用，未保存密钥。'); cipher = safeStorage.encryptString(apiKey).toString('base64'); } const p = await store.saveProvider({ ...publicData, hasKey: false }, cipher); emit({ type: 'state_changed' }); return p; }
+    case 'previewCheckpoint': assertChangesIdle(); store.session(arg.sessionId); return previewChangeCheckpoint(dataDir, arg.sessionId, arg.path);
+    case 'undo':
+    case 'checkpoint': {
+      assertChangesIdle(); store.session(arg.sessionId);
+      // Reserve synchronously, before any await, so a new send cannot race this operation.
+      changingFiles = true;
+      try {
+        if (method === 'undo') await undoChange(dataDir, arg.sessionId, arg.path);
+        else await checkpointChange(dataDir, arg.sessionId, arg.path, arg.expectedHash, arg.expectedRecordHash);
+        emit({ type: 'state_changed' });
+      } finally { changingFiles = false; }
+      return;
+    }
+    case 'saveProvider': { if (runs.size || starting.size || localServiceStart) throw new Error('任务或本地服务启动期间不能修改模型配置。'); const { apiKey, ...publicData } = arg; let cipher: string | undefined; if (apiKey) { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 密钥加密暂不可用，未保存密钥。'); cipher = safeStorage.encryptString(apiKey).toString('base64'); } const p = await store.saveProvider({ ...publicData, hasKey: false }, cipher); emit({ type: 'state_changed' }); return p; }
     case 'deleteProvider': { if (runs.size || starting.size) throw new Error('任务运行时不能删除供应商。'); await store.deleteProvider(arg); emit({ type: 'state_changed' }); return; }
     case 'testProvider': {
       if (runs.size || starting.size) throw new Error('请等待当前任务结束后测试连接。');
@@ -248,6 +255,14 @@ async function invoke(method: string, arg: any) {
     case 'setTheme': await store.setTheme(arg); return;
     case 'setFontSize': await store.setFontSize(arg); return;
     case 'health': return health();
+    case 'inspectLocalModel': return inspectLocalModel(arg, { managedState: () => managedOllamaState(home) });
+    case 'startLocalService': {
+      if (runs.size || starting.size) throw new Error('请等待当前任务结束后启动本地服务。');
+      if (store.provider('local').ollamaMode === 'existing') throw new Error('已有 Ollama 由你自行管理，应用不会启动或停止它。');
+      if (localServiceStart) return localServiceStart;
+      localServiceStart = startManagedOllama(home).then(() => health());
+      try { return await localServiceStart; } finally { localServiceStart = undefined; }
+    }
     case 'openDataFolder': await shell.openPath(dataDir); return;
   }
 }
@@ -316,9 +331,18 @@ else {
     if (quitting) return;
     try { await pets.init(); }
     catch (error: any) { if (!quitting) log.write(`Pet unavailable (main window remains usable): ${error.message}\n`); }
-    if (!quitting) void startOllamaIfNeeded();
   }).catch(error => {
     if (quitting) { log.write(`Startup cancelled during shutdown: ${error.message}\n`); return; }
     log.write(`Startup failure: ${error.stack}\n`); dialog.showErrorBox('LocalCode 启动失败', error.message); quitReady = true; app.quit();
   });
+}
+
+}
+try { initializeApplication(); }
+catch {
+  // Electron explicitly supports this native dialog before app.ready on Windows:
+  // https://www.electronjs.org/docs/latest/api/dialog#dialogshowerrorboxtitle-content
+  try { dialog.showErrorBox('LocalCode 无法启动：文件夹不可写', STARTUP_STORAGE_ERROR); }
+  catch { console.error(STARTUP_STORAGE_ERROR); }
+  finally { app.exit(1); }
 }

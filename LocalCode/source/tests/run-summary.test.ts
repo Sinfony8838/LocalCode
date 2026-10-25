@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Store } from '../src/main/store';
@@ -9,11 +9,14 @@ import type { AgentEvent } from '../src/shared/contracts';
 const base = path.resolve('../cache/tests');
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
     if (path.dirname(root) !== base || !path.basename(root).startsWith('run-summary-')) throw new Error('Unexpected cleanup path');
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+const baselinePath = (f: Awaited<ReturnType<typeof fixture>>, runId: string) => path.join(f.store.dataDir, 'changes', f.session.id, 'runs', `${runId}.json`);
 async function fixture() {
   await fs.mkdir(base, { recursive: true });
   const root = await fs.mkdtemp(path.join(base, 'run-summary-')); roots.push(root);
@@ -78,6 +81,92 @@ describe('whole-run completion boundaries', () => {
 });
 
 describe('per-run file evidence', () => {
+  it.each(['completed', 'failed', 'interrupted'] as const)('retires only the %s round snapshot after saving the summary and preserves undo', async status => {
+    const f = await fixture(); await fs.writeFile(path.join(f.projectPath, 'dirty.txt'), 'original\n');
+    const run = await f.begin(); const baseline = baselinePath(f, run.runId);
+    await run.write('dirty.txt', 'changed\n');
+    expect(JSON.parse(await fs.readFile(baseline, 'utf8')).files['dirty.txt']).toBe('original\n');
+    const unlink = fs.unlink.bind(fs);
+    const observed: string[] = [];
+    vi.spyOn(fs, 'unlink').mockImplementation(async file => {
+      if (String(file) === baseline) {
+        const persisted = JSON.parse(await fs.readFile(f.store.indexFile, 'utf8'));
+        expect(persisted.sessions[0].runs[0]).toMatchObject({ runId: run.runId, status, changes: [expect.objectContaining({ path: 'dirty.txt' })] });
+        observed.push(String(file));
+      }
+      return unlink(file);
+    });
+    const { summary } = await run.finish(status);
+    expect(observed).toEqual([baseline]);
+    await expect(fs.access(baseline)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await getChanges(f.store.dataDir, f.session.id)).toEqual([expect.objectContaining({ path: 'dirty.txt', before: 'original\n', after: 'changed\n' })]);
+    await undoChange(f.store.dataDir, f.session.id, 'dirty.txt');
+    expect(await fs.readFile(path.join(f.projectPath, 'dirty.txt'), 'utf8')).toBe('original\n');
+    const reopened = new Store(f.store.dataDir); await reopened.init();
+    expect(reopened.session(f.session.id).runs![0]).toEqual(summary);
+  });
+
+  it('retains the baseline when summary persistence fails and cleans it only after a successful retry', async () => {
+    const f = await fixture(); const run = await f.begin();
+    await run.write('tool.txt', 'saved\n');
+    const baseline = baselinePath(f, run.runId);
+    const rename = fs.rename.bind(fs);
+    const fail = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === f.store.indexFile) throw Object.assign(new Error('simulated disk failure'), { code: 'EIO' });
+      return rename(from, to);
+    });
+    await expect(run.finish()).rejects.toThrow('simulated disk failure');
+    await expect(fs.access(baseline)).resolves.toBeUndefined();
+    expect(JSON.parse(await fs.readFile(f.store.indexFile, 'utf8')).sessions[0].runs[0].status).toBe('running');
+    fail.mockRestore();
+    await f.store.persist();
+    expect(JSON.parse(await fs.readFile(f.store.indexFile, 'utf8')).sessions[0].runs[0].status).toBe('completed');
+    await expect(fs.access(baseline)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('retains interrupted recovery evidence until its index is saved and retries leftover cleanup after restart', async () => {
+    const f = await fixture(); const run = await f.begin(); await run.write('known.txt', 'known\n');
+    const baseline = baselinePath(f, run.runId);
+    const rename = fs.rename.bind(fs);
+    const fail = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === f.store.indexFile) throw Object.assign(new Error('recovery write failed'), { code: 'EIO' });
+      return rename(from, to);
+    });
+    await expect(new Store(f.store.dataDir).init()).rejects.toThrow('recovery write failed');
+    await expect(fs.access(baseline)).resolves.toBeUndefined();
+    fail.mockRestore();
+    const unlink = fs.unlink.bind(fs);
+    const blockedCleanup = vi.spyOn(fs, 'unlink').mockImplementation(async file => {
+      if (String(file) === baseline) throw Object.assign(new Error('scanner holds baseline'), { code: 'EBUSY' });
+      return unlink(file);
+    });
+    const recovered = new Store(f.store.dataDir); await recovered.init();
+    const summary = recovered.session(f.session.id).runs![0];
+    expect(summary.status).toBe('interrupted');
+    expect(summary.changes).toEqual([expect.objectContaining({ path: 'known.txt' })]);
+    await expect(fs.access(baseline)).resolves.toBeUndefined();
+    blockedCleanup.mockRestore();
+    const reopened = new Store(f.store.dataDir); await reopened.init();
+    expect(reopened.session(f.session.id).runs![0]).toEqual(summary);
+    await expect(fs.access(baseline)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await getChanges(f.store.dataDir, f.session.id)).toHaveLength(1);
+  });
+
+  it('retires replaced rounds without deleting the new active baseline or either tool journal', async () => {
+    const f = await fixture(); const first = await f.begin(); await first.write('first.txt', 'first\n');
+    const second = await f.begin();
+    expect(f.store.session(f.session.id).runs![0].status).toBe('interrupted');
+    await expect(fs.access(baselinePath(f, first.runId))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(baselinePath(f, second.runId))).resolves.toBeUndefined();
+    const unrelated = path.join(f.store.dataDir, 'changes', f.session.id, 'runs', 'unknown-run.json');
+    await fs.writeFile(unrelated, 'unsettled evidence');
+    await second.finish();
+    await expect(fs.access(baselinePath(f, second.runId))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readFile(unrelated, 'utf8')).toBe('unsettled evidence');
+    await undoChange(f.store.dataDir, f.session.id, 'first.txt');
+    await expect(fs.access(path.join(f.projectPath, 'first.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('retains tool baselines for existing files outside automatic scan scope and excludes their net-zero edits', async () => {
     const f = await fixture();
     const excluded = ['.env', 'dist/compiled.txt', 'node_modules/dependency.txt', '.aws/credentials'];

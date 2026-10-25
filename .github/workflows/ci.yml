@@ -27,6 +27,14 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $target
           & (Join-Path $target 'gitleaks.exe') git --redact --no-banner .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check setup without downloads (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\scripts\Test-Setup.ps1
+      - name: Check setup without downloads (PowerShell 7)
+        shell: pwsh
+        run: .\scripts\Test-Setup.ps1
+      - name: Test portable package allowlist
+        run: node --test scripts/tests/portable-bundle.test.mjs
       - run: npm ci
         working-directory: LocalCode/source
       - run: npm run typecheck
@@ -38,5 +46,51 @@ jobs:
       - name: Verify turn summaries and embedded artifacts in Electron
         run: node scripts/acceptance-artifacts.mjs
         working-directory: LocalCode/source
+      - name: Verify first-run model setup in Electron
+        run: node scripts/acceptance-model-setup.mjs
+        working-directory: LocalCode/source
+      - name: Verify user-approved external edit checkpoints
+        run: node scripts/acceptance-checkpoint.mjs
+        working-directory: LocalCode/source
       - run: npm audit --omit=dev --audit-level=high
         working-directory: LocalCode/source
+      - name: Package Windows application
+        run: npm run package
+        working-directory: LocalCode/source
+      - name: Verify the packaged desktop with isolated fixtures
+        shell: pwsh
+        working-directory: LocalCode/source
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          node scripts/acceptance-artifacts.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create portable download and checksums
+        shell: pwsh
+        run: |
+          $version = (Get-Content LocalCode/source/package.json -Raw | ConvertFrom-Json).version
+          $name = "LocalCode-$version-windows-x64"
+          node scripts/portable-bundle.mjs "$env:RUNNER_TEMP/$name"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bundle = "$env:RUNNER_TEMP/$name"
+          function Snapshot-Bundle {
+            (Get-ChildItem -LiteralPath $bundle -Recurse -Force | Sort-Object FullName | ForEach-Object { "$($_.FullName)|$($_.LastWriteTimeUtc.Ticks)|$(if (-not $_.PSIsContainer) { $_.Length })" }) -join "`n"
+          }
+          $before = Snapshot-Bundle
+          $env:LOCALCODE_NO_PAUSE = '1'
+          $plan = (& "$bundle/Install-LocalModel.cmd" -Plan | Out-String)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $details = $plan | ConvertFrom-Json
+          if ($details.mode -ne 'model-only' -or $details.buildsDesktop -ne $false) { throw 'Portable installer selected the wrong mode' }
+          if ((Snapshot-Bundle) -ne $before) { throw 'Portable Plan modified the bundle' }
+          $out = Join-Path $env:RUNNER_TEMP 'localcode-download'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Compress-Archive -LiteralPath "$env:RUNNER_TEMP/$name" -DestinationPath "$out/$name.zip"
+          $hash = (Get-FileHash "$out/$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name.zip" | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+      - name: Retain tested Windows download
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: LocalCode-windows-x64
+          path: ${{ runner.temp }}/localcode-download/
+          if-no-files-found: error
+          retention-days: 14

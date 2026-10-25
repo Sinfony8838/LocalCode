@@ -11,3 +11,15 @@ export function selectProviderModel(provider: ProviderConfig, modelId?: string):
   if (!model || !model.enabled) throw new Error('模型不存在或已停用，请重新选择模型。');
   return { ...provider, model: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens };
 }
+
+export const MANAGED_OLLAMA_URL = 'http://127.0.0.1:11434/v1';
+/** Local discovery and inference never accept credentials, remote hosts or proxy paths. */
+export function localOllamaUrl(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.username || url.password || url.search || url.hash || url.pathname.replace(/\/$/, '') !== '/v1') {
+    throw new Error('本地 Ollama 仅支持 http://127.0.0.1:端口/v1、http://localhost:端口/v1 或 http://[::1]:端口/v1，不含凭证或其他路径。');
+  }
+  // Never resolve a hostname when contacting the local service.
+  if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
+  return url.origin + '/v1';
+}

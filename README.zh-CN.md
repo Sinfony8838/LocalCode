@@ -6,29 +6,71 @@
 
 本仓库公开完整应用架构、源码、测试、依赖锁及一键部署脚本。
 
-## 一键复现
+## 快速开始：先选适合的下载方式
 
-1. 准备 Windows 11 x64，至少预留 **25 GB 磁盘空间**。Windows 10 22H2 x64 属于上游兼容目标，本项目未实测。首次安装需要联网。
-2. 克隆仓库，或下载源码 ZIP 解压到自己可写的本地目录，避免系统保护目录与网络共享目录。
-3. 双击根目录 **`Setup.cmd`**。脚本自动下载并核验固定版本 Node.js 24.14.0、Ollama 0.40.10，安装锁定依赖，执行类型检查、测试、构建与打包，下载 `qwen3.5:9b-q4_K_M`，创建 8192 tokens 上下文的 `localcode-agent` 别名。无需管理员权限或 API Key。
-4. 双击根目录 **`Start.cmd`**，打开项目，先试一个小任务。终端命令需逐条确认。
+推荐 **Windows 11 x64**；Windows 10 22H2 x64 属于上游兼容目标，本项目未实测。请把**完整文件夹解压**到自己可写的本地目录，例如 `D:\LocalCode`，不要在 ZIP 内、系统保护目录或网络共享目录运行。**无需手动安装 Node.js、npm 或 Git，也不需要管理员权限。**
+
+### 便携桌面版：解压即开
+
+成功的 **Source checks** 工作流会生成 **`LocalCode-windows-x64`** Actions 构建产物；下载 Actions 产物需要登录 GitHub。产物内含 `LocalCode-0.1.14-windows-x64.zip` 与 `SHA256SUMS.txt`：先解压下载的产物包，再解压里面的应用 ZIP。这是验证构建，**不是已经发布的 GitHub Release**；是否可下载取决于对应工作流是否成功以及产物保留期限。
+
+1. 双击解压后的 **`Start.cmd`** 即可打开桌面，不需要编译工具，也不会自动下载模型。
+2. 在设置中选择连接方式：
+   - **已经安装 Ollama？** 明确选择连接已有本地服务，并选一个它已经安装的模型。LocalCode 不会替换、安装或停止这个服务。
+   - **使用自己的 API？** 配置提供方。保存配置不会发起模型请求；手动测试连接或发送任务可能消耗额度。
+   - **需要 LocalCode 自带管理的本地模型？** 关闭桌面后，双击 **`Install-LocalModel.cmd`**，下载并校验固定版本 Ollama 0.40.10 与 `qwen3.5:9b-q4_K_M`，创建 8192 tokens 上下文的 `localcode-agent`。这一步**不下载 Node.js，也不重新构建桌面**。预计下载数 GB，建议预留 **25 GiB**；选择默认 9B 模型前，请先看下方硬件建议。
+3. 打开项目文件夹，先试一个小任务。终端命令需逐条确认。
+
+打开桌面不会悄悄启动或复用 Ollama。重启电脑后，如需本套托管服务，请在设置中明确点击启动，或运行 `Ollama\Start.cmd`。关闭桌面不会关闭已经运行的本套 Ollama，空闲五分钟卸载模型；`Ollama\Stop.cmd` 仅停止路径匹配的本套服务。
+
+**已有安装如何更新：** 先把新便携 ZIP 解压到**新目录**，检查新版本前保留完整旧目录，尤其是 `LocalCode/data`。不同目录之间不会自动迁移会话和设置；不要盲目覆盖或删除旧数据，也不要把数据目录作为问题附件上传，其中可能包含会话和凭据。在同一安装内更换模型或提供方会保留已有会话历史。
+
+### 源码 ZIP：安装脚本自动准备构建环境
+
+下载并完整解压仓库源码 ZIP，或在已使用 Git 时克隆仓库。双击 **`Setup.cmd`**，选择：
+
+| 选项 | 自动准备的内容 | 建议空闲空间 |
+| --- | --- | --- |
+| **1 — 本地模型 + 桌面** | 便携 Node.js、锁定依赖、检查/构建/打包、托管 Ollama 和默认本地模型 | **25 GiB**，更大模型需要更多 |
+| **2 — 仅桌面** | 便携 Node.js、锁定依赖、检查/构建/打包；不下载 Ollama 运行时或模型 | **5 GiB** |
+| **3 — 退出** | 不安装 | — |
+
+安装成功后双击 **`Start.cmd`**。脚本会显示当前阶段，成功或失败都会保留窗口；大量下载前先检查 Windows x64、解压文件、目录写入权限、磁盘空间与本套服务端口冲突。空间低于建议值会提示，低于 1 GiB 会停止；缓存状态与模型大小会影响需求，因此检查通过不代表模型一定装得下。安装脚本不购买服务，也不会要求输入 API 密钥。
+
+命令行传入参数会跳过菜单：
 
 ```powershell
-git clone https://github.com/Sinfony8838/LocalCode.git
-cd LocalCode
-.\Setup.cmd
-.\Start.cmd
+# 源码版：只构建桌面，不下载本地模型。
+.\Setup.cmd -BuildOnly
+# 源码版：明确指定模型，完整安装。
+.\Setup.cmd -Model qwen3.5:9b-q4_K_M
+# 已有便携桌面：只添加托管本地模型。
+.\Install-LocalModel.cmd
 ```
 
-首次下载数 GB 文件，耗时取决于网络。模型下载中断可重跑脚本续传。重跑前请关闭 LocalCode。若 11434 端口已有其他 Ollama，部署脚本会停止并说明，不会终止或悄悄复用其他服务，请自行处理端口冲突。关闭桌面端保留 Ollama，空闲五分钟卸载模型；`Ollama\Stop.cmd` 仅停止路径匹配的本套服务。
-
-仅查看部署计划（无下载、无写入）：
+仅查看任一种部署计划，**不下载、不启动服务、不写文件**：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Plan
+.\Setup.cmd -Plan
+.\Setup.cmd -BuildOnly -Plan
+.\Install-LocalModel.cmd -Plan
 ```
 
-`-BuildOnly` 只构建桌面，不安装 Ollama、不下载模型，仍会下载 Node.js 和 npm 依赖。
+### 遇到提示时怎么处理
+
+| 提示 / 场景 | 处理办法 |
+| --- | --- |
+| 缺少 PowerShell / 系统不支持 | 请使用 Windows x64 和系统自带的 Windows PowerShell 5.1 或更新版本。当前启动器不支持 ARM64、32 位 Windows、macOS 或 Linux。 |
+| 缺少源码 / 找不到程序 | 请完整解压正确的 ZIP，不要只复制启动器。源码版先运行 `Setup.cmd`；便携桌面版不需要重新构建源码。 |
+| 目录无法写入 / 空间不足 | 移动完整目录到自己可写的本地磁盘，或自行释放空间；不应仅为绕过目录权限而使用管理员模式。脚本不会自动删除文件。 |
+| 没有 `curl.exe` | 无需额外安装，脚本会改用 PowerShell 自带的 HTTPS 下载功能。 |
+| 下载或 npm 安装失败 | 先看失败阶段与域名，检查网络、代理或组织网络限制，按需要允许访问 `nodejs.org`、`registry.npmjs.org`、GitHub 和 Ollama 模型仓库，再用**同一个安装脚本、相同参数**重试。不要关闭证书校验或防火墙。 |
+| 校验失败 / 解压目录不完整 | 脚本拒绝使用或覆盖可疑文件。按提示检查具体路径，自行移走该文件或目录后重试；不会跳过完整性校验。 |
+| 无法确认端口归属 | 脚本会停止，不会仅凭进程名称就信任服务。请使用带有 NetTCPIP 网络诊断组件的系统 PowerShell；组件缺失时可请管理员恢复，不会自动修改系统。 |
+| 11434 端口被占用 | 不会终止或复用其他进程。可保留已有 Ollama，在设置中明确选择连接；若要安装本套模型，请先自行退出已有服务。源码用户可选择“仅桌面”。 |
+| 模型下载中断 | 便携版重跑 `Install-LocalModel.cmd`；源码版按原参数重跑 `Setup.cmd`。Ollama 模型下载可续传，运行时压缩包失败后可能重新下载。 |
+
+首次下载需要联网，可能耗时较长；准备好后模型可在本地推理。重跑任一安装脚本前请关闭 LocalCode，遇到问题保留窗口里的错误信息。脚本保护已有数据，不修改全局环境变量、防火墙或 Windows 服务。
 
 ## 支持设备与更大模型
 
@@ -45,7 +87,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Plan
 
 **配置高于本设备的机器可以部署更大、可能更强的本地模型。** 实际取决于显存、内存、模型量化、KV 缓存、上下文及并行数；大模型不保证每项编码任务更好，应验证工具调用、正确性、耗时和资源余量。MoE 的激活参数量不等于全部权重占用。
 
-在**全新克隆目录**指定模型和预算，例如：
+首次在**全新源码目录**安装托管模型时，可指定模型和预算，例如：
 
 ```powershell
 # 小显存示例候选，未经编码验收
@@ -55,7 +97,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Model qwen3.5:4
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Model qwen3.5:27b -Context 8192 -MaxTokens 1024
 ```
 
-桌面统一连接 `localcode-agent`，由脚本把别名指向所选模型。上下文与输出预算写入 `LocalCode/model-profile.json`，首次创建数据索引时读取。已有会话继续用保存的预算；变更预算请用全新克隆，脚本拒绝直接修改已有数据的预算。安装记录标明推理验收 `UNRUN`，安装成功不等于模型能力验收。
+本套托管安装创建 `localcode-agent` 别名，指向所选模型；连接已有 Ollama 时则使用你明确选择的已安装模型。首次安装的上下文与输出预算写入 `LocalCode/model-profile.json`，创建应用数据索引时读取。之后可在设置中更换已安装模型、应用上下文预算和输出上限，不会删除已有会话；新的任务轮次使用更新后的设置，正在进行的轮次继续使用启动时的参数。应用里的上下文预算**不会改变 Ollama 实际的 `num_ctx`**，不应高于服务端/模型实际配置的上下文。安装脚本仍拒绝在已有应用数据时，用不兼容的预算覆盖部署配置；若要重新制作不同预算的托管别名，请用新目录，不要覆盖旧数据。安装记录标明推理验收 `UNRUN`，安装成功不等于模型能力验收。
 
 官方依据：[Windows 要求](https://docs.ollama.com/windows)、[硬件支持](https://docs.ollama.com/gpu)、[默认模型](https://ollama.com/library/qwen3.5:9b-q4_K_M)。固定的便携运行时附带 NVIDIA 依赖，AMD/Intel 需另行按上游部署。模型标签可能变化；验证脚本可显示当前模型摘要。
 
@@ -81,9 +123,12 @@ npm test -- --no-file-parallelism
 npm run build
 npm start
 npm run package
+cd ..\..
+# 仓库根目录：离线安装脚本测试，无真实下载或服务启动。
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Setup.ps1
 ```
 
-使用 Node.js 24 x64，锁文件固定精确依赖。打包生成独立版本目录，拒绝覆盖不同构建。直接 `npm start` 默认使用 Electron 用户数据目录；根启动器使用项目内的便携数据目录。目录布局与完整架构图见[英文说明](README.md#architecture)。
+手动开发使用 Node.js 24 x64；源码安装脚本会自动下载它。锁文件固定精确依赖。打包生成独立版本目录，拒绝覆盖不同构建。直接 `npm start` 默认使用 Electron 用户数据目录；根启动器使用项目内的便携数据目录。目录布局与完整架构图见[英文说明](README.md#architecture)。
 
 桌宠默认关闭，不发布角色美术素材。可自行导入具有合法使用权的 1536×2288 RGBA PNG 图集（8 列×11 行）；两个人物槽位使用中性名称。
 

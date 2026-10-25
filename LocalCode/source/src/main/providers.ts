@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import type { ProviderSecret } from '../shared/contracts';
 
 const modelSchema = z.object({ id: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072), enabled: z.boolean() }).strict()
@@ -10,9 +11,17 @@ export const providerSchema = z.object({
     catch { return false; }
   }, 'Base URL 仅支持不含凭证、查询参数的 HTTP/HTTPS 地址'),
   model: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072),
-  enabled: z.boolean().optional(), models: z.array(modelSchema).min(1).max(100).optional(), apiKey: z.string().trim().min(6).max(4096).optional(),
+  ollamaMode: z.enum(['managed', 'existing']).optional(), enabled: z.boolean().optional(), models: z.array(modelSchema).min(1).max(100).optional(), apiKey: z.string().trim().min(6).max(4096).optional(),
 }).strict().superRefine((v, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
+  if (v.kind === 'ollama') {
+    try {
+      const localUrl = localOllamaUrl(v.baseUrl);
+      if (v.id !== 'local') issue('Ollama 使用内置本地配置。');
+      if (v.ollamaMode !== 'existing' && localUrl !== MANAGED_OLLAMA_URL) issue('托管 Ollama 的地址不可更改；请显式选择已有 Ollama。');
+    } catch { issue('本地 Ollama 需要不含凭证的回环地址，路径为 /v1。'); }
+    if (v.apiKey) issue('本地 Ollama 不需要 API Key。');
+  } else if (v.ollamaMode) issue('仅本地 Ollama 可选择服务来源。');
   if (v.maxTokens + 1536 >= v.contextWindow) issue('输出预算过大，请为上下文留出压缩空间');
   if (v.models) {
     if (new Set(v.models.map(m => m.id)).size !== v.models.length) issue('模型 ID 不能重复');

@@ -33,6 +33,17 @@ public static class LocalCodeCommandJob {
  }
 }`;
 function powershellExe() { return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); }
+/** Read-only prerequisite check; never installs a runtime or falls back to another shell. */
+export async function assertPowerShellExecutable(executable: string): Promise<void> {
+  try {
+    if ((await fs.stat(executable)).isFile()) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new Error(`无法检查 Windows PowerShell：${executable}。请检查文件访问权限后重试；命令尚未执行。`, { cause: error });
+    }
+  }
+  throw new Error(`未找到 Windows PowerShell 5.1：${executable}。请启用或修复 Windows 自带的 Windows PowerShell 后重试。使用云端模型不需要 Ollama，但执行终端命令仍需要此组件；命令尚未执行。`);
+}
 function bootstrap(command: string, token: string, readyPath: string) {
   // A non-interactive process cannot accidentally wait forever at Read-Host.
   const gate = readyPath.replaceAll("'", "''");
@@ -56,6 +67,7 @@ export async function executePowerShell(options: { command: string; cwd: string;
   if (process.platform !== 'win32') throw new Error('此版本的命令工具仅支持 Windows PowerShell。');
   const token = randomUUID();
   const executable = powershellExe();
+  await assertPowerShellExecutable(executable);
   const logs = path.join(options.dataDir, 'logs', 'commands');
   const owned = path.join(options.dataDir, 'owned-commands');
   const temp = path.join(options.dataDir, 'temp', 'commands');
