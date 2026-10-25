@@ -8,11 +8,11 @@ const summary: Summary = { runId: 'run', startedAt: '2026-01-01T00:00:00Z', stat
   changes: [], changeScope: 'file_tools', durationMs: 1500 };
 
 describe('runtime summary does not certify task verification', () => {
-  it('labels a finished runtime without claiming that a task or test passed', () => {
+  it('shows elapsed time without claiming that a task or test passed', () => {
     const html = renderToStaticMarkup(<RunSummary run={summary} />);
-    expect(html).toContain('本轮运行结束');
+    expect(html).toContain('用时 1秒');
     expect(html).toContain('aria-label="本轮运行记录"');
-    expect(html).toContain('不代表测试或任务验收通过');
+    expect(html).not.toContain('不代表测试或任务验收通过');
     expect(html).not.toContain('本轮已完成');
     expect(html).not.toContain('本轮完成总结');
     expect(html).not.toContain('lucide-check');
