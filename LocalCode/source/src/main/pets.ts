@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, screen, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, dialog, nativeImage, screen, type IpcMainInvokeEvent } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,14 +7,17 @@ import { DEFAULT_PET, PET_NAMES, type PetAnimation, type PetCharacter, type PetD
 import type { AgentEvent } from '../shared/contracts';
 import { clampPetPosition, lookDirection, petActivity } from '../core/pet-state';
 import { DEFAULT_LOCALE, translate, type AppLocale } from '../shared/i18n';
+import { PetLibrary, petDetailsSchema, petIdSchema, validatePetAtlasHeader, type CustomPet } from '../core/pet-library';
 
-const prefs = z.object({ enabled: z.boolean(), selected: z.enum(['paimon', 'ronova']), size: z.union([z.literal(128), z.literal(160), z.literal(192)]), alwaysOnTop: z.boolean(), paused: z.boolean(), followCursor: z.boolean(), position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional() }).strict();
+const prefs = z.object({ enabled: z.boolean(), selected: petIdSchema, size: z.union([z.literal(128), z.literal(160), z.literal(192)]), alwaysOnTop: z.boolean(), paused: z.boolean(), followCursor: z.boolean(), position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional() }).strict();
 const patch = prefs.omit({ position: true }).partial().strict();
 const dragInput = z.object({ id: z.string().uuid(), phase: z.enum(['start', 'move', 'end', 'cancel']), screenX: z.number().finite().min(-100000).max(100000), screenY: z.number().finite().min(-100000).max(100000) }).strict();
 export class PetController {
   private window?: BrowserWindow;
   private preferences: PetPreferences = { ...DEFAULT_PET };
   private characters: PetCharacter[] = [];
+  private library: PetLibrary;
+  private libraryWarning?: string;
   private activity = petActivity('idle');
   private direction?: number;
   private interval?: ReturnType<typeof setInterval>;
@@ -28,18 +31,26 @@ export class PetController {
   private dragAnimation?: PetAnimation;
   private cursor?: { x: number; y: number; movedAt: number };
   private pointerDrag?: { id: string; screenX: number; screenY: number; x: number; y: number };
-  constructor(private home: string, private dist: string, private mainWindow: () => BrowserWindow | undefined, private openMain: () => void, private locale: () => AppLocale = () => DEFAULT_LOCALE) {}
+  constructor(private home: string, private dist: string, private mainWindow: () => BrowserWindow | undefined, private openMain: () => void, private locale: () => AppLocale = () => DEFAULT_LOCALE) { this.library = new PetLibrary(path.join(home, 'data/pets'), bytes => this.validateAtlas(bytes)); }
   private get file() { return path.join(this.home, 'data', 'pets.json'); }
   private async atlas(id: PetId): Promise<{ file: string; source: 'bundled' | 'imported'; bytes: Buffer } | undefined> {
-    for (const [file, source] of [[path.join(this.home, 'data/pets', `${id}.png`), 'imported'], [path.join(this.dist, 'renderer/pets', `${id}.png`), 'bundled']] as const) {
-      try { const bytes = await fs.readFile(file); this.validateAtlas(bytes); return { file, source, bytes }; }
+    petIdSchema.parse(id);
+    const sources: [string, 'imported' | 'bundled'][] = [[path.join(this.home, 'data/pets', `${id}.png`), 'imported']];
+    if (id === 'paimon' || id === 'ronova') sources.push([path.join(this.dist, 'renderer/pets', `${id}.png`), 'bundled']);
+    for (const [file, source] of sources) {
+      let bytes: Buffer;
+      try { const info = await fs.stat(file); if (!info.isFile() || info.size > 16 * 1024 * 1024) continue; bytes = await fs.readFile(file); }
+      catch { continue; }
+      try { this.validateAtlas(bytes); return { file, source, bytes }; }
       catch (error: any) { if (error.code !== 'ENOENT') continue; }
     }
   }
   private validateAtlas(bytes: Buffer) {
-    if (bytes.length > 16 * 1024 * 1024 || bytes.length < 33 || bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || bytes.toString('ascii', 12, 16) !== 'IHDR' || bytes.readUInt32BE(16) !== 1536 || bytes.readUInt32BE(20) !== 2288 || bytes[24] !== 8 || bytes[25] !== 6) throw new Error('请选择 1536×2288、8 位 RGBA 的 PNG 动画图集。不会执行或转换导入文件。');
+    validatePetAtlasHeader(bytes);
+    const image = nativeImage.createFromBuffer(bytes), size = image.getSize();
+    if (image.isEmpty() || size.width !== 1536 || size.height !== 2288) throw new Error('PNG 图集无法完整解码，请重新导出或生成。');
   }
-  async asset(id: PetId): Promise<Buffer | undefined> { return (await this.atlas(id))?.bytes; }
+  async asset(id: PetId): Promise<Buffer | undefined> { if (!petIdSchema.safeParse(id).success || !this.characters.some(character => character.id === id)) return; return (await this.atlas(id))?.bytes; }
   async init() {
     if (this.closing) return;
     await fs.mkdir(path.dirname(this.file), { recursive: true });
@@ -54,9 +65,13 @@ export class PetController {
     screen.on('display-removed', this.reposition); screen.on('display-metrics-changed', this.reposition);
   }
   private async refreshCharacters() {
-    this.characters = await Promise.all((['paimon', 'ronova'] as PetId[]).map(async id => { const image = await this.atlas(id); return { id, name: PET_NAMES[id], available: !!image, source: image?.source ?? 'missing', version: image ? createHash('sha256').update(image.bytes).digest('hex').slice(0, 16) : '' }; }));
+    let custom: CustomPet[] = [];
+    try { custom = await this.library.list(); this.libraryWarning = undefined; }
+    catch (error) { this.libraryWarning = (error as Error).message; }
+    const entries = [{ id: 'paimon', name: PET_NAMES.paimon, description: '陪你一起探索的旅伴' }, { id: 'ronova', name: PET_NAMES.ronova, description: '安静守候每一次灵感' }, ...custom];
+    this.characters = await Promise.all(entries.map(async entry => { const image = await this.atlas(entry.id); return { ...entry, available: !!image, source: image?.source ?? 'missing', version: image ? createHash('sha256').update(image.bytes).digest('hex').slice(0, 16) : '' }; }));
   }
-  snapshot(): PetSnapshot { return structuredClone({ locale: this.locale(), preferences: this.preferences, characters: this.characters, ...this.activity, ...(this.dragAnimation ? { animation: this.dragAnimation } : {}), lookDirection: this.direction }); }
+  snapshot(): PetSnapshot { return structuredClone({ locale: this.locale(), preferences: this.preferences, characters: this.characters, ...this.activity, ...(this.dragAnimation ? { animation: this.dragAnimation } : {}), lookDirection: this.direction, libraryWarning: this.libraryWarning }); }
   refreshLocale() { this.window?.setTitle(translate(this.locale(), 'LocalCode 桌宠')); this.broadcast(); }
   private broadcast() {
     const state = this.snapshot(), fingerprint = JSON.stringify(state);
@@ -112,15 +127,33 @@ export class PetController {
     await this.persist(); await this.syncWindow(); this.broadcast(); return this.snapshot();
   }
   async importAtlas(id: PetId) {
-    const choice = await dialog.showOpenDialog(this.mainWindow()!, { title: translate(this.locale(), '导入 {name} 原始动画图集', { name: translate(this.locale(), PET_NAMES[id]) }), properties: ['openFile'], filters: [{ name: translate(this.locale(), '1536×2288 RGBA 动画图集'), extensions: ['png'] }] });
+    petIdSchema.parse(id);
+    const character = this.characters.find(entry => entry.id === id);
+    if (!character) throw new Error('宠物不存在，请刷新列表。');
+    const choice = await dialog.showOpenDialog(this.mainWindow()!, { title: translate(this.locale(), '导入 {name} 原始动画图集', { name: id.startsWith('custom-') ? character.name : translate(this.locale(), character.name) }), properties: ['openFile'], filters: [{ name: translate(this.locale(), '1536×2288 RGBA 动画图集'), extensions: ['png'] }] });
     if (choice.canceled || !choice.filePaths[0]) return this.snapshot();
-    const file = choice.filePaths[0], info = await fs.stat(file);
-    if (!info.isFile() || info.size > 16 * 1024 * 1024) throw new Error('图集必须是小于 16MiB 的 PNG 文件。');
-    const bytes = await fs.readFile(file); this.validateAtlas(bytes);
-    const destination = path.join(this.home, 'data/pets', `${id}.png`); await fs.mkdir(path.dirname(destination), { recursive: true });
-    try { await fs.copyFile(destination, `${destination}.previous-${Date.now()}`); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
-    const temp = `${destination}.${randomUUID()}.tmp`; await fs.writeFile(temp, bytes, { flag: 'wx' }); await fs.rename(temp, destination);
+    if (this.closing) throw new Error('应用正在关闭。');
+    await this.library.replace(id, choice.filePaths[0]);
     await this.refreshCharacters(); return this.save({ selected: id, enabled: true });
+  }
+  async create(input: { name: string; description?: string }) {
+    const details = petDetailsSchema.parse(input);
+    const choice = await dialog.showOpenDialog(this.mainWindow()!, { title: translate(this.locale(), '导入新的虚拟宠物'), properties: ['openFile'], filters: [{ name: translate(this.locale(), '宠物清单或动画图集'), extensions: ['json', 'png'] }] });
+    if (choice.canceled || !choice.filePaths[0]) return this.snapshot();
+    if (this.closing) throw new Error('应用正在关闭。');
+    const character = await this.library.create(choice.filePaths[0], details);
+    await this.refreshCharacters(); return this.save({ selected: character.id, enabled: true });
+  }
+  async refresh() {
+    await this.refreshCharacters();
+    if (!this.characters.some(character => character.id === this.preferences.selected && character.available)) {
+      this.preferences.selected = this.characters.find(character => character.available)?.id ?? 'paimon';
+      await this.persist();
+    }
+    await this.syncWindow(); this.broadcast(); return this.snapshot();
+  }
+  async remove(id: PetId) {
+    await this.library.remove(id); return this.refresh();
   }
   onAgentEvent(event: AgentEvent) {
     if (this.closing) return;
@@ -170,7 +203,14 @@ export class PetController {
     if ((sender !== main?.webContents && sender !== this.window?.webContents) || event.senderFrame !== sender.mainFrame || !event.senderFrame?.url.startsWith('localcode://app/')) throw new Error('桌宠调用来源无效。');
     if (method === 'state') { z.undefined().parse(argument); return this.snapshot(); }
     if (method === 'save') return this.save(patch.parse(argument));
-    if (method === 'import') return this.importAtlas(z.enum(['paimon', 'ronova']).parse(argument));
+    if (['import', 'create', 'refresh', 'remove'].includes(String(method))) {
+      if (sender !== main?.webContents) throw new Error('仅主窗口可管理宠物库。');
+      if (this.closing) throw new Error('应用正在关闭。');
+      if (method === 'import') return this.importAtlas(petIdSchema.parse(argument));
+      if (method === 'create') return this.create(petDetailsSchema.parse(argument));
+      if (method === 'remove') return this.remove(petIdSchema.parse(argument));
+      z.undefined().parse(argument); return this.refresh();
+    }
     if (method === 'interactive') { const value = z.boolean().parse(argument); if (sender !== this.window?.webContents) throw new Error('仅桌宠窗口可调整自身鼠标穿透。'); this.window.setIgnoreMouseEvents(!value && !this.pointerDrag, { forward: true }); return; }
     if (method === 'drag') { if (sender !== this.window?.webContents) throw new Error('仅桌宠窗口可拖动自身位置。'); return this.drag(dragInput.parse(argument)); }
     if (method === 'action') {
@@ -186,6 +226,6 @@ export class PetController {
     this.closing = true; if (this.interval) clearInterval(this.interval); if (this.transient) clearTimeout(this.transient); if (this.moveTimer) clearTimeout(this.moveTimer);
     await this.finishPointerDrag();
     screen.removeListener('display-removed', this.reposition); screen.removeListener('display-metrics-changed', this.reposition);
-    this.window?.destroy(); this.window = undefined; await this.persist(); await this.writes;
+    this.window?.destroy(); this.window = undefined; await this.persist(); await this.writes; await this.library.settled();
   }
 }

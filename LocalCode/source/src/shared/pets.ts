@@ -1,5 +1,5 @@
 import type { AppLocale } from './i18n';
-export type PetId = 'paimon' | 'ronova';
+export type PetId = string;
 export type PetAnimation = 'idle' | 'running-right' | 'running-left' | 'waving' | 'jumping' | 'failed' | 'waiting' | 'running' | 'review';
 export interface PetPreferences {
   enabled: boolean;
@@ -10,7 +10,7 @@ export interface PetPreferences {
   followCursor: boolean;
   position?: { x: number; y: number };
 }
-export interface PetCharacter { id: PetId; name: string; available: boolean; version: string; source: 'bundled' | 'imported' | 'missing' }
+export interface PetCharacter { id: PetId; name: string; description?: string; available: boolean; version: string; source: 'bundled' | 'imported' | 'missing' }
 export interface PetSnapshot {
   locale?: AppLocale;
   preferences: PetPreferences;
@@ -18,6 +18,7 @@ export interface PetSnapshot {
   animation: PetAnimation;
   label: string;
   lookDirection?: number;
+  libraryWarning?: string;
 }
 export interface PetDragInput { id: string; phase: 'start' | 'move' | 'end' | 'cancel'; screenX: number; screenY: number }
 export interface PetApi {
@@ -25,6 +26,9 @@ export interface PetApi {
   save(input: Partial<Omit<PetPreferences, 'position'>>): Promise<PetSnapshot>;
   action(action: 'open-main' | 'hide' | 'reset-position'): Promise<void>;
   importAtlas(id: PetId): Promise<PetSnapshot>;
+  create(input: { name: string; description?: string }): Promise<PetSnapshot>;
+  refresh(): Promise<PetSnapshot>;
+  remove(id: PetId): Promise<PetSnapshot>;
   interactive(value: boolean): Promise<void>;
   drag(input: PetDragInput): Promise<void>;
   onState(listener: (snapshot: PetSnapshot) => void): () => void;

@@ -52,11 +52,15 @@ function FloatingPet() {
       <button aria-label={t("打开 LocalCode")} title={t("打开 LocalCode")} onClick={() => report(window.localpets.action('open-main'))}><Eye size={13}/></button>
       <button aria-label={state.preferences.paused ? t('继续桌宠动画') : t('暂停桌宠动画')} title={state.preferences.paused ? t('继续动画') : t('暂停动画')} onClick={() => report(window.localpets.save({ paused: !state.preferences.paused }))}>{state.preferences.paused ? <Play size={12}/> : <Pause size={12}/>}</button>
       <button aria-label={t("切换桌宠置顶")} title={t("切换置顶")} aria-pressed={state.preferences.alwaysOnTop} onClick={() => report(window.localpets.save({ alwaysOnTop: !state.preferences.alwaysOnTop }))}><Pin size={12}/></button>
-      {state.characters.filter(c => c.available).map(c => <button className="lc-pet-switch" key={c.id} title={t('切换为{name}', { name: t(c.name) })} aria-label={t('切换为{name}', { name: t(c.name) })} aria-pressed={state.preferences.selected === c.id} onClick={() => report(window.localpets.save({ selected: c.id }))}>{c.id === 'paimon' ? 'A' : 'B'}</button>)}
+      <button className="lc-pet-switch" title={t('切换下一个桌宠')} aria-label={t('切换下一个桌宠')} disabled={state.characters.filter(c => c.available).length < 2} onClick={() => {
+        const available = state.characters.filter(c => c.available);
+        const next = available[(available.findIndex(c => c.id === character.id) + 1) % available.length];
+        if (next) report(window.localpets.save({ selected: next.id }));
+      }}>{character.id === 'paimon' ? 'A' : character.id === 'ronova' ? 'B' : character.name.slice(0, 1)}</button>
       <button aria-label={t("隐藏桌宠")} title={t("隐藏桌宠（可在应用内重新打开）")} onClick={() => report(window.localpets.action('hide'))}><X size={13}/></button>
     </div>
     <button className="lc-pet-balloon" onMouseEnter={() => interactive(true)} title={t("点击查看任务")} onClick={() => report(window.localpets.action('open-main'))}>{t(error || state.label)}</button>
-    <div className={`lc-pet-drag ${dragging ? 'dragging' : ''}`} role="button" aria-label={t('拖动{name}', { name: t(character.name) })} tabIndex={0}
+    <div className={`lc-pet-drag ${dragging ? 'dragging' : ''}`} role="button" aria-label={t('拖动{name}', { name: character.id.startsWith('custom-') ? character.name : t(character.name) })} tabIndex={0}
       onMouseEnter={() => interactive(true)} onPointerDown={pointerDown} onPointerMove={pointerMove}
       onPointerUp={e => {
         if (gesture.current?.pointerId !== e.pointerId) return;
