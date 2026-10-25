@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, Theme, SidebarPreferences } from '../shared/contracts';
+import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, Theme, SidebarPreferences, AttachmentInfo, ApprovalMode, WorkMode, GoalState } from '../shared/contracts';
 import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import { reduceAgentEvent } from '../shared/session-events';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_SIDEBAR } from '../shared/contracts';
@@ -40,7 +40,10 @@ export class Store {
     this.state.settings.sidebar = { ...DEFAULT_SIDEBAR, ...this.state.settings.sidebar, collapsedProjects: this.state.settings.sidebar?.collapsedProjects || [] };
     for (const session of this.state.sessions) {
       session.projectId ??= null;
-      if (session.status === 'running' || session.status === 'awaiting_approval') {
+      session.approvalMode ??= 'ask'; session.workMode ??= 'execute';
+      if (session.goal?.status === 'active') { session.goal.status = 'paused'; session.goal.reason = '应用重启，目标已暂停。'; }
+      delete session.question;
+      if (['running', 'awaiting_approval', 'awaiting_input'].includes(session.status)) {
         session.status = 'interrupted'; session.error = '上次运行被中断。不会自动重放命令，可以发送新消息继续。';
       }
       for (const run of session.runs ?? []) if (run.status === 'running') {
@@ -108,13 +111,13 @@ export class Store {
   async createSession(projectId: string | null = null) {
     if (projectId !== null) this.project(projectId);
     const now = new Date().toISOString();
-    const session: SessionView = { id: randomUUID(), projectId, title: '新会话', createdAt: now, updatedAt: now, providerId: 'local', status: 'idle', messages: [], tools: [] };
+    const session: SessionView = { id: randomUUID(), projectId, title: '新会话', createdAt: now, updatedAt: now, providerId: 'local', status: 'idle', approvalMode: 'ask', workMode: 'execute', messages: [], tools: [] };
     this.state.sessions.unshift(session); await this.persist(); return structuredClone(session);
   }
   async moveSession(sessionId: string, projectId: string) {
     this.project(projectId);
     const session = this.session(sessionId);
-    if (session.status === 'running' || session.status === 'awaiting_approval') throw new Error('请等待任务结束后再移入项目。');
+    if (['running', 'awaiting_approval', 'awaiting_input'].includes(session.status)) throw new Error('请等待任务结束后再移入项目。');
     if (session.projectId === projectId) return structuredClone(session);
     // A projectless transcript has no workspace journal to rebind or move.
     if (session.projectId) throw new Error('此任务已属于项目；可在目标项目中新建任务。');
@@ -134,7 +137,7 @@ export class Store {
     await this.persist(); return structuredClone(this.state.settings.sidebar);
   }
   async renameSession(id: string, title: string) { const s = this.session(id); s.title = title; await this.persist(); return structuredClone(s); }
-  async beginRun(sessionId: string, prompt: string, providerId: string, modelId?: string) {
+  async beginRun(sessionId: string, prompt: string, providerId: string, modelId?: string, options: { attachments?: AttachmentInfo[]; approvalMode?: ApprovalMode; workMode?: WorkMode; automatic?: boolean } = {}) {
     const s = this.session(sessionId); this.provider(providerId);
     // Main-process guards prevent overlap; retain a truthful boundary if callers
     // replace an unfinished round (for example during recovery).
@@ -146,10 +149,13 @@ export class Store {
     }
     s.runId = randomUUID(); s.status = 'running'; s.providerId = providerId; s.error = undefined; s.approval = undefined;
     delete s.progress;
+    delete s.question;
+    s.approvalMode = options.approvalMode ?? s.approvalMode ?? 'ask';
+    s.workMode = options.workMode ?? s.workMode ?? 'execute';
     s.modelId = modelId;
     s.updatedAt = new Date().toISOString();
-    if (s.title === '新会话') s.title = prompt.replace(/\s+/g, ' ').slice(0, 36);
-    s.messages.push({ id: randomUUID(), role: 'user', text: prompt, createdAt: s.updatedAt, runId: s.runId });
+    if (s.title === '新会话') s.title = (prompt.trim() || options.attachments?.[0]?.name || '附件任务').replace(/\s+/g, ' ').slice(0, 36);
+    s.messages.push({ id: randomUUID(), role: 'user', text: prompt, createdAt: s.updatedAt, runId: s.runId, ...(options.attachments?.length ? { attachments: options.attachments } : {}), ...(options.automatic ? { automatic: true } : {}) });
     const run = { runId: s.runId, startedAt: s.updatedAt, status: 'running' as const, changes: [], changeScope: 'workspace_snapshot' as const };
     (s.runs ??= []).push(run);
     try { if (s.projectId) await beginRunChanges(this.dataDir, sessionId, s.runId, this.project(s.projectId).path); }
@@ -198,6 +204,20 @@ export class Store {
     const i = this.state.settings.providers.findIndex(p => p.id === provider.id);
     if (i >= 0) this.state.settings.providers[i] = provider; else this.state.settings.providers.push(provider);
     await this.persist(); return structuredClone(provider);
+  }
+  /** Compare the identity before mutating: late workers cannot update a replacement goal. */
+  async updateGoal(sessionId: string, expectedId: string, patch: Partial<Omit<GoalState, 'id'>>) {
+    const session = this.session(sessionId);
+    if (session.goal?.id !== expectedId) return false;
+    if (session.goal.status === 'budget_limited' && patch.status && patch.status !== 'budget_limited') return false;
+    session.goal = { ...session.goal, ...patch, updatedAt: new Date().toISOString() };
+    await this.persist(); return true;
+  }
+  async replaceGoal(sessionId: string, goal?: GoalState) { const session = this.session(sessionId); session.goal = goal; await this.persist(); }
+  async acceptPlan(sessionId: string, planId: string) {
+    const session = this.session(sessionId);
+    if (!session.plan || session.plan.id !== planId || session.plan.status !== 'proposed') throw new Error('计划已失效。');
+    session.plan.status = 'accepted'; session.workMode = 'execute'; await this.persist();
   }
   async deleteProvider(id: string) {
     if (id === 'local') throw new Error('内置本地模型不可删除。');

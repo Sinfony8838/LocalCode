@@ -131,7 +131,9 @@ export async function readWorkspaceFile(projectPath: string, relativePath: strin
   const content = await readWorkspaceText(projectPath, rel);
   return { path: rel, content: content.slice(0, DISPLAY_CHARS), truncated: content.length > DISPLAY_CHARS };
 }
-interface ChangeRecord { path: string; projectPath: string; runId: string; before: string | null; after: string; afterHash: string; pending: boolean }
+interface ChangeRecord { path: string; projectPath: string; displayPath?: string; runId: string; before: string | null; after: string; afterHash: string; pending: boolean }
+function recordKey(record: Pick<ChangeRecord, 'path' | 'projectPath'>) { return workspacePathKey(path.resolve(record.projectPath, record.path)); }
+function displayPath(record: ChangeRecord) { return record.displayPath ?? record.path; }
 const recordHash = (record: ChangeRecord) => hash(Buffer.from(JSON.stringify([record.path, record.projectPath, record.runId, record.before, record.after, record.afterHash, record.pending])));
 interface CheckpointRecord { id: string; approvedAt: string; previous: ChangeRecord; approved: string; approvedHash: string }
 interface Journal { version: 1; records: ChangeRecord[]; runRecords?: ChangeRecord[]; checkpoints?: CheckpointRecord[] }
@@ -170,7 +172,7 @@ async function atomicWorkspaceWrite(projectPath: string, relative: string, bytes
     await fs.rename(temp, target.absolute);
   } finally { await fs.unlink(temp).catch(() => {}); }
 }
-export async function writeWorkspaceText(input: { projectPath: string; dataDir: string; sessionId: string; runId: string; relativePath: string; content: string; expectedText?: string }): Promise<void> {
+export async function writeWorkspaceText(input: { projectPath: string; dataDir: string; sessionId: string; runId: string; relativePath: string; content: string; expectedText?: string; displayPath?: string }): Promise<void> {
   const rel = normalizeRelative(input.relativePath);
   if (typeof input.content !== 'string' || input.content.includes('\0')) throw new Error('只允许写入文本内容。');
   const nextBytes = Buffer.from(input.content, 'utf8');
@@ -183,20 +185,21 @@ export async function writeWorkspaceText(input: { projectPath: string; dataDir: 
     if (input.expectedText !== undefined && (before === null || decode(before) !== input.expectedText)) throw new Error('文件自读取后已变化，未覆盖，请重新读取。');
     const original = await loadJournal(input.dataDir, input.sessionId);
     const journal: Journal = structuredClone(original);
-    const key = workspacePathKey(rel);
-    const existing = journal.records.find(r => workspacePathKey(r.path) === key);
-    if (existing && (before === null || hash(before) !== existing.afterHash)) throw new Error('文件包含本任务之外的新修改；请先结束任务，再在“修改”面板预览并确认当前内容为新起点，或新建会话。');
+    const canonicalRoot = await fs.realpath(input.projectPath);
+    const key = recordKey({ path: rel, projectPath: canonicalRoot });
+    const existing = journal.records.find(r => recordKey(r) === key);
+    if (existing && (before === null || hash(before) !== existing.afterHash)) throw new Error('文件包含本任务之外的新修改；请保留当前内容并新建会话后继续。');
     const record: ChangeRecord = {
-      path: existing?.path ?? rel, projectPath: await fs.realpath(input.projectPath), runId: safeId(input.runId),
+      path: rel, projectPath: canonicalRoot, ...(input.displayPath ? { displayPath: input.displayPath } : {}), runId: safeId(input.runId),
       before: existing ? existing.before : before?.toString('base64') ?? null,
       after: nextBytes.toString('base64'), afterHash: hash(nextBytes), pending: true,
     };
     // Keep each round's first bytes independently from the cumulative undo baseline.
     // A later round touching the same file must not rewrite earlier round evidence.
-    const runExisting = journal.runRecords?.find(r => r.runId === input.runId && workspacePathKey(r.path) === key);
+    const runExisting = journal.runRecords?.find(r => r.runId === input.runId && recordKey(r) === key);
     const runRecord: ChangeRecord = { ...record, path: runExisting?.path ?? record.path, before: runExisting ? runExisting.before : before?.toString('base64') ?? null };
-    journal.runRecords = [...(journal.runRecords ?? []).filter(r => r.runId !== input.runId || workspacePathKey(r.path) !== key), runRecord];
-    journal.records = journal.records.filter(r => workspacePathKey(r.path) !== key);
+    journal.runRecords = [...(journal.runRecords ?? []).filter(r => r.runId !== input.runId || recordKey(r) !== key), runRecord];
+    journal.records = journal.records.filter(r => recordKey(r) !== key);
     journal.records.push(record);
     await atomicJson(file, journal);
     try {
@@ -213,10 +216,10 @@ export async function writeWorkspaceText(input: { projectPath: string; dataDir: 
     }
   });
 }
-export async function getRunToolChanges(dataDir: string, sessionId: string, runId: string): Promise<Array<{ path: string; before: string | null; after: string; pending: boolean }>> {
+export async function getRunToolChanges(dataDir: string, sessionId: string, runId: string): Promise<Array<{ path: string; projectPath: string; relativePath: string; before: string | null; after: string; pending: boolean }>> {
   const journal = await loadJournal(dataDir, sessionId);
   return (journal.runRecords ?? []).filter(record => record.runId === runId).map(record => ({
-    path: record.path, before: record.before === null ? null : decode(Buffer.from(record.before, 'base64')),
+    path: displayPath(record), projectPath: record.projectPath, relativePath: record.path, before: record.before === null ? null : decode(Buffer.from(record.before, 'base64')),
     after: decode(Buffer.from(record.after, 'base64')), pending: record.pending,
   }));
 }
@@ -226,20 +229,20 @@ export async function getChanges(dataDir: string, sessionId: string): Promise<Ch
     let conflict = record.pending;
     try { const current = await readBytes(record.projectPath, record.path, true); conflict ||= !current || hash(current) !== record.afterHash; }
     catch { conflict = true; }
-    return { path: record.path, before: record.before === null ? '' : decode(Buffer.from(record.before, 'base64')), after: decode(Buffer.from(record.after, 'base64')), created: record.before === null, conflict, runId: record.runId };
+    return { path: displayPath(record), before: record.before === null ? '' : decode(Buffer.from(record.before, 'base64')), after: decode(Buffer.from(record.after, 'base64')), created: record.before === null, conflict, runId: record.runId };
   }));
 }
 export async function undoChange(dataDir: string, sessionId: string, relativePath: string): Promise<void> {
-  const rel = normalizeRelative(relativePath); const file = journalPath(dataDir, sessionId);
+  const rel = path.isAbsolute(relativePath) ? path.resolve(relativePath) : normalizeRelative(relativePath); const file = journalPath(dataDir, sessionId);
   return locked(file, async () => {
     const journal = await loadJournal(dataDir, sessionId);
-    const record = journal.records.find(r => workspacePathKey(r.path) === workspacePathKey(rel));
+    const record = journal.records.find(r => workspacePathKey(displayPath(r)) === workspacePathKey(rel));
     if (!record) throw new Error('没有找到此文件的修改记录。');
-    const target = await resolveWorkspacePath(record.projectPath, rel, { write: true });
-    const current = await readBytes(record.projectPath, rel);
+    const target = await resolveWorkspacePath(record.projectPath, record.path, { write: true });
+    const current = await readBytes(record.projectPath, record.path);
     if (!current || hash(current) !== record.afterHash) throw new Error('撤销冲突：文件已被再次修改，当前内容已保留。');
     if (record.before === null) await fs.unlink(target.absolute);
-    else await atomicWorkspaceWrite(record.projectPath, rel, Buffer.from(record.before, 'base64'));
+    else await atomicWorkspaceWrite(record.projectPath, record.path, Buffer.from(record.before, 'base64'));
     journal.records = journal.records.filter(r => r !== record);
     await atomicJson(file, journal);
   });
@@ -247,7 +250,7 @@ export async function undoChange(dataDir: string, sessionId: string, relativePat
 
 /** UI-only review: return every byte as bounded, valid UTF-8, never a truncated approval. */
 export async function previewChangeCheckpoint(dataDir: string, sessionId: string, relativePath: string): Promise<ChangeCheckpointPreview> {
-  const rel = normalizeRelative(relativePath);
+  const rel = path.isAbsolute(relativePath) ? path.resolve(relativePath) : normalizeRelative(relativePath);
   return locked(journalPath(dataDir, sessionId), async () => {
     const journal = await loadJournal(dataDir, sessionId);
     const record = checkpointRecord(journal, rel);
@@ -256,18 +259,18 @@ export async function previewChangeCheckpoint(dataDir: string, sessionId: string
     if (current.length > MAX_CHECKPOINT_BYTES) throw new Error('新起点预览仅支持不超过 128KiB 的文本文件；较大文件请保留当前内容并新建会话。');
     const currentHash = hash(current);
     if (currentHash === record.afterHash) throw new Error('文件没有需要确认的外部修改，请刷新修改面板。');
-    return { path: record.path, content: decode(current), currentHash, recordHash: recordHash(record), byteLength: current.length };
+    return { path: displayPath(record), content: decode(current), currentHash, recordHash: recordHash(record), byteLength: current.length };
   });
 }
 function checkpointRecord(journal: Journal, relativePath: string): ChangeRecord {
-  const record = journal.records.find(r => workspacePathKey(r.path) === workspacePathKey(relativePath));
+  const record = journal.records.find(r => workspacePathKey(displayPath(r)) === workspacePathKey(relativePath));
   if (!record) throw new Error('没有找到此文件的修改记录。');
   if (record.pending) throw new Error('上次文件写入未完成，不能创建新起点；请先检查并恢复修改记录。');
   return record;
 }
 /** Explicit desktop-user approval only. Do not expose this as an agent tool. */
 export async function checkpointChange(dataDir: string, sessionId: string, relativePath: string, expectedHash: string, expectedRecordHash: string): Promise<void> {
-  const rel = normalizeRelative(relativePath); const file = journalPath(dataDir, sessionId);
+  const rel = path.isAbsolute(relativePath) ? path.resolve(relativePath) : normalizeRelative(relativePath); const file = journalPath(dataDir, sessionId);
   if (!/^[a-f0-9]{64}$/.test(expectedHash) || !/^[a-f0-9]{64}$/.test(expectedRecordHash)) throw new Error('无效的预览校验值，请重新预览。');
   return locked(file, async () => {
     const journal = await loadJournal(dataDir, sessionId);

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import type { ProviderSecret } from '../shared/contracts';
 
-const modelSchema = z.object({ id: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072), enabled: z.boolean() }).strict()
+const modelSchema = z.object({ id: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072), enabled: z.boolean(), supportsImages: z.boolean().optional() }).strict()
   .refine(v => v.maxTokens + 1536 < v.contextWindow, '上下文需留出至少 1536 tokens 供压缩和输入使用');
 export const providerSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/), name: z.string().trim().min(1).max(80), kind: z.enum(['ollama', 'openai', 'anthropic', 'responses']),
@@ -11,7 +11,7 @@ export const providerSchema = z.object({
     catch { return false; }
   }, 'Base URL 仅支持不含凭证、查询参数的 HTTP/HTTPS 地址'),
   model: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072),
-  ollamaMode: z.enum(['managed', 'existing']).optional(), enabled: z.boolean().optional(), models: z.array(modelSchema).min(1).max(100).optional(), apiKey: z.string().trim().min(6).max(4096).optional(),
+  ollamaMode: z.enum(['managed', 'existing']).optional(), supportsImages: z.boolean().optional(), enabled: z.boolean().optional(), models: z.array(modelSchema).min(1).max(100).optional(), apiKey: z.string().trim().min(6).max(4096).optional(),
 }).strict().superRefine((v, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
   if (v.kind === 'ollama') {

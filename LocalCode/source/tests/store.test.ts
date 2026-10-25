@@ -15,6 +15,13 @@ async function setup() {
   return { root, project, store, p, s };
 }
 describe('durable UI index', () => {
+  it('creates idle sessions with durable mode defaults so a restart does not mutate them', async () => {
+    const { store } = await setup();
+    const idle = await store.createSession();
+    expect(idle).toMatchObject({approvalMode:'ask',workMode:'execute',status:'idle'});
+    const reopened = new Store(store.dataDir); await reopened.init();
+    expect(reopened.session(idle.id)).toEqual(idle);
+  });
   it('migrates missing or invalid language settings and persists valid settings without changing history', async () => {
     const { store, s } = await setup();
     expect(store.settings().locale).toBe('zh-CN');
@@ -45,6 +52,25 @@ describe('durable UI index', () => {
     await fs.writeFile(path.join(bad, 'model-profile.json'), JSON.stringify({ contextWindow: 8192, maxTokens: 1024, baseUrl: 'https://example.com', hasKey: true }));
     await expect(new Store(path.join(bad, 'data')).init()).rejects.toThrow('本地模型配置无效');
     await expect(fs.access(path.join(bad, 'data/index.json'))).rejects.toThrow();
+  });
+  it('persists attachments and plans, pauses goals on restart and ignores old goal identities', async () => {
+    const { store, s } = await setup();
+    const goal = { id: randomUUID(), objective:'完成验证', status:'active' as const, budgetMs:7200000, activeMs:1200, updatedAt:new Date().toISOString() };
+    await store.replaceGoal(s.id,goal);
+    expect(await store.updateGoal(s.id,'old-goal',{status:'complete'})).toBe(false);
+    const attachment = {id:randomUUID(),name:'示例.png',kind:'image' as const,size:128,mimeType:'image/png',previewUrl:'localcode-attachment://asset/example'};
+    const run = await store.beginRun(s.id,'附件分析','local',undefined,{attachments:[attachment],workMode:'plan',approvalMode:'full'});
+    const base = {sessionId:s.id,runId:run.runId!};
+    await store.event({...base,type:'plan',plan:{id:'plan-1',runId:run.runId!,text:'只读分析结果',status:'proposed'}});
+    await store.event({...base,type:'question',question:{id:'q-1',...base,questions:[{header:'范围',question:'选择范围',options:[{label:'小'}]}]}});
+    const recovered = new Store(store.dataDir); await recovered.init(); const session = recovered.session(s.id);
+    expect(session.status).toBe('interrupted'); expect(session.question).toBeUndefined();
+    expect(session.goal).toMatchObject({id:goal.id,status:'paused',activeMs:1200});
+    expect(session.messages[0].attachments).toEqual([attachment]); expect(session.plan?.text).toBe('只读分析结果');
+    expect(session.workMode).toBe('plan'); expect(session.approvalMode).toBe('full');
+    await recovered.updateGoal(s.id,goal.id,{status:'budget_limited'});
+    expect(await recovered.updateGoal(s.id,goal.id,{status:'complete'})).toBe(false);
+    expect(recovered.session(s.id).goal?.status).toBe('budget_limited');
   });
   it('starts projectless conversations without a workspace snapshot, then moves the same transcript into a project', async () => {
     const { root, project } = await setup();

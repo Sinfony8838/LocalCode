@@ -33,7 +33,7 @@ async function receive(value: unknown): Promise<void> {
     return;
   }
   const command = value as WorkerCommand;
-  if (!['run', 'approve', 'abort', 'shutdown'].includes(command.type)) return;
+  if (!['run', 'approve', 'answer', 'abort', 'shutdown'].includes(command.type)) return;
   try {
     await engine.handle(command);
     if (command.type === 'shutdown') process.exit(0);

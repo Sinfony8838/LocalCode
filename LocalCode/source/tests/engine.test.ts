@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent';
-import { AgentEngine, sessionStorage, type EngineSession, type EngineToolContext } from '../src/agent/engine.js';
+import { AgentEngine, sessionStorage, promptImages, systemPromptFor, type EngineSession, type EngineToolContext } from '../src/agent/engine.js';
 import type { AgentEvent, RunRequest } from '../src/shared/contracts.js';
 
 const temporary: string[] = [];
@@ -122,7 +122,7 @@ describe('AgentEngine lifecycle and approval fencing', () => {
   });
 
   it('allows exactly one final text response after twelve calls and preserves stable message IDs', async () => {
-    const f = fakeEngine(); const done = f.engine.handle(await request());
+    const f = fakeEngine(); const req = await request(); req.provider.kind = 'ollama'; const done = f.engine.handle(req);
     await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
     const session = f.sessions[0];
     session.emit({ type: 'message_start', message: { role: 'assistant' } });
@@ -152,7 +152,7 @@ describe('AgentEngine lifecycle and approval fencing', () => {
   });
 
   it.each(['extra request', 'extra tool', 'user cancellation'] as const)('keeps the summary phase bounded for %s', async action => {
-    const f = fakeEngine(); const done = f.engine.handle(await request());
+    const f = fakeEngine(); const req = await request(); req.provider.kind = 'ollama'; const done = f.engine.handle(req);
     await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
     const session = f.sessions[0];
     for (let i = 0; i < 12; i++) {
@@ -172,7 +172,7 @@ describe('AgentEngine lifecycle and approval fencing', () => {
   });
 
   it.each(['excess compaction', 'compaction after final'] as const)('bounds hidden final-phase requests: %s', async action => {
-    const f = fakeEngine(); const done = f.engine.handle(await request());
+    const f = fakeEngine(); const req = await request(); req.provider.kind = 'ollama'; const done = f.engine.handle(req);
     await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
     for (let i = 0; i < 12; i++) {
       f.sessions[0].emit({ type: 'tool_execution_start', toolCallId: `tool${i}`, toolName: 'read_file', args: {} });
@@ -198,9 +198,64 @@ describe('session boundary', () => {
   });
 });
 
+describe('plan, goal, attachment and cloud execution controls', () => {
+  it('allows cloud runs to execute beyond twelve tools while keeping the local cap', async () => {
+    const f = fakeEngine(); const req = await request(); const done = f.engine.handle(req);
+    await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    for (let i = 0; i < 16; i++) {
+      f.sessions[0].emit({ type: 'tool_execution_start', toolCallId: `cloud-${i}`, toolName: 'read_file', args: { path: 'a' } });
+      f.contexts[0].beforeTool('read_file', { path: 'a' });
+      f.sessions[0].emit({ type: 'tool_execution_end', toolCallId: `cloud-${i}`, toolName: 'read_file', isError: false, result: { content: [] } });
+    }
+    expect(f.events.some(e => e.type === 'error')).toBe(false); f.sessions[0].settle(); await done;
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'completed' });
+    expect(systemPromptFor(req)).not.toContain('每轮最多12');
+  });
+  it('keeps plan mode immutable even with full access and fences question answers by run and question', async () => {
+    const f = fakeEngine(); const req = { ...await request(), workMode: 'plan' as const, approvalMode: 'full' as const }; const done = f.engine.handle(req);
+    await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    for (const name of ['write_file', 'edit_file', 'powershell']) expect(() => f.contexts[0].beforeTool(name, {})).toThrow('计划模式');
+    const wait = f.contexts[0].requestQuestion([{ header: '范围', question: '修改哪里？', options: [{ label: '当前文件' }, { label: '整个项目' }] }]);
+    const question = f.events.find(e => e.type === 'question'); if (question?.type !== 'question') throw new Error('missing question');
+    await f.engine.handle({ type: 'answer', runId: 'stale', questionId: question.question.id, answers: [['错误']] });
+    await f.engine.handle({ type: 'answer', runId: req.runId, questionId: 'stale', answers: [['错误']] });
+    expect(f.events.filter(e => e.type === 'question_resolved')).toHaveLength(0);
+    await f.engine.handle({ type: 'answer', runId: req.runId, questionId: question.question.id, answers: [['自定义回答']] });
+    expect(await wait).toEqual([['自定义回答']]);
+    const cancelled = f.contexts[0].requestQuestion(question.question.questions);
+    await f.engine.abort(); expect(await cancelled).toBeNull(); await done;
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'interrupted' });
+  });
+  it('remembers a session approval in this run only after a matching accepted reply', async () => {
+    const f = fakeEngine(); const req = await request(); const done = f.engine.handle(req);
+    await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    const waiting = f.contexts[0].requestApproval({ command: 'Get-Location', cwd: req.projectPath, permissionKey: 'exact-permission' });
+    const event = f.events.find(e => e.type === 'approval'); if (event?.type !== 'approval') throw new Error('missing approval');
+    await f.engine.handle({ type: 'approve', runId: req.runId, approvalId: event.approval.id, allow: true, scope: 'session' });
+    expect(await waiting).toBe(true); expect(f.contexts[0].grants).toEqual(['exact-permission']);
+    f.sessions[0].settle(); await done;
+  });
+  it('rejects local goals before constructing a model session', async () => {
+    const f = fakeEngine(); const req = await request(); req.provider.kind = 'ollama'; req.goal = { id: 'goal', objective: 'finish' };
+    await f.engine.handle(req); expect(f.sessions).toHaveLength(0);
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('不支持目标模式') });
+  });
+  it('uses SDK image decoding and only sends newly attached images', async () => {
+    const req = await request(); const imagePath = path.join(req.dataDir, 'image.png');
+    const bytes = await readFile(path.resolve('src/renderer/public/branding/localcode-logo.png')); await writeFile(imagePath, bytes);
+    req.attachments = [{ id: 'new', name: 'a.png', kind: 'image', mimeType: 'image/png', size: bytes.length, storagePath: imagePath }, { id: 'old', name: 'b.png', kind: 'image', mimeType: 'image/png', size: bytes.length, storagePath: imagePath }];
+    req.newAttachmentIds = ['new'];
+    await expect(promptImages(req, new AbortController().signal)).rejects.toThrow('图片输入能力');
+    req.provider.supportsImages = true;
+    const images = await promptImages(req, new AbortController().signal); expect(images).toHaveLength(1); expect(images[0].type).toBe('image'); expect(['image/png', 'image/jpeg']).toContain(images[0].mimeType); expect(images[0].data.length).toBeGreaterThan(10);
+    req.newAttachmentIds = []; expect(await promptImages(req, new AbortController().signal)).toEqual([]);
+    req.provider.supportsImages = false; await expect(promptImages(req, new AbortController().signal)).rejects.toThrow('此会话包含图片');
+  });
+});
+
 async function closeServer(server: Server) { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 it.each(['text', 'forbidden tool'] as const)('uses real pi to offer one tool-disabled final response after call twelve: %s', async finalResponse => {
-  const req = await request();
+  const req = await request(); req.provider.kind = 'ollama';
   const payloads: Record<string, unknown>[] = [];
   const server = createServer(async (incoming, response) => {
     let body = ''; for await (const chunk of incoming) body += chunk;
@@ -296,7 +351,7 @@ it('uses real pi against a local mock API: streams, strictly validates tools, pe
 }, 30_000);
 
 it('keeps threshold compaction separate from the one visible final summary after tool twelve', async () => {
-  const req = await request('budget-compaction');
+  const req = await request('budget-compaction'); req.provider.kind = 'ollama';
   const payloads: Record<string, unknown>[] = []; const compactions: Record<string, unknown>[] = [];
   let assistantRequests = 0;
   const server = createServer(async (incoming, response) => {

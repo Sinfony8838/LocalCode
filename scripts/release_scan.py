@@ -16,6 +16,20 @@ ALLOWED_BINARY_ASSETS = {
     'LocalCode/source/src/renderer/public/branding/localcode-logo.png': '5e0f8b5d2889191806db2f137f947c8d2d092c43d63098a6348ec0809eec5b2e',
     'LocalCode/source/src/renderer/public/branding/localcode.ico': 'b0e41b7046c2b029e9f5d402c2ebf8ad3edf99fd6bb50526438ba852e91934b0',
 }
+ALLOWED_REFERENCE_SOURCES = {
+    "LocalCode/source/third_party/codex/codex-rs/core/src/exec_policy_windows_tests.rs": "b64307cf24195b7cf0cede0d4a8112383e714c9e837143801219235c14fbfe17",
+    "LocalCode/source/third_party/codex/codex-rs/ext/goal/src/accounting.rs": "949c44b911bb7eeb7867e78770a7597b23d3bd9afe7b4dede631f783b2c97aeb",
+    "LocalCode/source/third_party/codex/codex-rs/ext/goal/src/extension.rs": "649d840b4bdfb318b31ade690733e585c85babbc40f103183aadffd367fe1c26",
+    "LocalCode/source/third_party/codex/codex-rs/ext/goal/src/runtime.rs": "c25b96e72b7aa629bfeac6186314585771fa89d5bd9d2c92ec642c9f11bbb46e",
+    "LocalCode/source/third_party/codex/codex-rs/shell-command/src/command_safety/fixtures/powershell_lowering.json": "6be1395e41fa38bb5e2ba49f4e3a1e10fbe57e0e809ce688601af734f7a24936",
+    "LocalCode/source/third_party/codex/codex-rs/shell-command/src/command_safety/powershell_tree_sitter.rs": "5fe2634f123641c5a44c56f326d0c399ee7edb8962c0b075b98e423a529a4ecf",
+    "LocalCode/source/third_party/codex/codex-rs/state/src/runtime/goals.rs": "2e3e7de1f1a67b8eb51e388a83cb91b6020d5156b4da6f9a305c7d83858cadfd",
+    "LocalCode/source/third_party/codex/LICENSE": "fada9cda895b67af092f74f75ba23230e8d4eeef3d06af394a1dc79093d10787",
+    "LocalCode/source/third_party/codex/NOTICE": "8b6db9c66bc81dba23ba1e4cd255bf9f2a1f799f532d97c1ef310f5e379407d7",
+    "LocalCode/source/third_party/opencode/LICENSE": "d1a549bbb600032e0184f9e874d4d96cd951f26dcce6dbf1e1313c819a231dac",
+    "LocalCode/source/third_party/opencode/packages/core/src/util/wildcard.ts": "965e902e2a3e01fa71a8847a37b6a86ca1301a27d5830e33ab67cd2a4473d3b2",
+    "LocalCode/source/third_party/opencode/packages/opencode/src/permission/index.ts": "b152062772126727ec18cffb52702c4029ea8367a4fb31095798b6e3e61a4857"
+}
 PATTERNS = {
     'private-key': re.compile(rb'-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----'),
     'github-token': re.compile(rb'(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})'),
@@ -30,11 +44,12 @@ def inspect(name, mode, content, private_values=()):
     issues = []
     path = PurePosixPath(name)
     approved_binary = ALLOWED_BINARY_ASSETS.get(name) == hashlib.sha256(content).hexdigest()
+    approved_reference = ALLOWED_REFERENCE_SOURCES.get(name) == hashlib.sha256(content).hexdigest()
     if mode != '100644' and mode != '100755':
         issues.append('symlink-or-submodule')
-    if any(p.lower() in BLOCKED_DIRS for p in path.parts):
+    if any(p.lower() in BLOCKED_DIRS for p in path.parts) and not approved_reference:
         issues.append('runtime-or-private-directory')
-    if path.name.startswith('.env') or (not approved_binary and path.suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES):
+    if path.name.startswith('.env') or (not approved_binary and not approved_reference and path.suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES):
         issues.append('unapproved-file-type')
     if len(content) > 2 * 1024 * 1024 or (not approved_binary and b'\x00' in content):
         issues.append('oversized-or-binary')

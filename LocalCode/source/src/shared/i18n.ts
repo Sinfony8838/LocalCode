@@ -1,3 +1,4 @@
+import { agentModeTranslations } from './locales/agent-modes';
 import { appTranslations } from './locales/app';
 import { modelTranslations } from './locales/models';
 import { auxiliaryTranslations } from './locales/auxiliary';
@@ -13,7 +14,7 @@ export function isAppLocale(value: unknown): value is AppLocale {
   return typeof value === 'string' && (APP_LOCALES as readonly string[]).includes(value);
 }
 export const translations: Record<string, readonly [string, string, string]> = {
-  ...appTranslations, ...modelTranslations, ...auxiliaryTranslations, ...backendTranslations, ...taskTranslations, ...petTranslations,
+  ...agentModeTranslations, ...appTranslations, ...modelTranslations, ...auxiliaryTranslations, ...backendTranslations, ...taskTranslations, ...petTranslations,
 };
 export type TranslationValues = Record<string, string | number>;
 

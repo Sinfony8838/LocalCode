@@ -8,7 +8,8 @@ import rehypeHighlight from 'rehype-highlight';
 import { diffLines } from 'diff';
 import PetControls from './PetControls';
 import ModelSettings from './ModelSettings';
-import ModelPicker from './ModelPicker';
+import Composer, { AttachmentStrip, emptyDraft, type ComposerDraft } from './Composer';
+import { ApprovalCard, GoalCard, PlanCard, QuestionCard } from './AgentControls';
 import TaskSidebar, { MoveTaskDialog, ProjectPicker } from './TaskNavigation';
 import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
 import RunSummary, { RunTiming } from './RunSummary';
@@ -31,7 +32,7 @@ import type {
 } from '../shared/contracts';
 
 const STATUS_LABELS: Record<RunStatus, string> = {
-  idle: '准备就绪', running: '正在处理', awaiting_approval: '等待确认',
+  idle: '准备就绪', running: '正在处理', awaiting_approval: '等待批准', awaiting_input: '等待回答',
   completed: '已完成', failed: '运行失败', interrupted: '已停止',
 };
 const TOOL_LABELS: Record<string, string> = {
@@ -41,12 +42,13 @@ const TOOL_LABELS: Record<string, string> = {
   search_files: '搜索代码', powershell: '运行命令', shell: '运行命令',
   load_skill: '读取桌宠定制 Skill',
 };
-const isBusy = (status?: RunStatus) => status === 'running' || status === 'awaiting_approval';
+const isBusy = (status?: RunStatus) => status === 'running' || status === 'awaiting_approval' || status === 'awaiting_input';
 const shortPath = (path: string) => path.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/');
 const now = () => new Date().toISOString();
 const makeId = () => crypto.randomUUID();
 const sortSessions = (sessions: SessionView[]) => [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 export const sessionTitle = (session: SessionView) => session.title === '新会话' && !session.messages.length ? t('新会话') : session.title;
+const draftSignature = (draft: ComposerDraft) => JSON.stringify({ text: draft.text, attachmentIds: draft.attachments.map(item => item.id), approvalMode: draft.approvalMode, workMode: draft.workMode, goal: draft.goal });
 
 export default function App() {
   useLocale();
@@ -56,7 +58,9 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [activeProjectId, setActiveProjectId] = useState('');
   const [activeSessionId, setActiveSessionId] = useState('');
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
+  const [pendingImports, setPendingImports] = useState<Record<string, number>>({});
+  const [pendingInteractions, setPendingInteractions] = useState<Record<string, boolean>>({});
   const [draftModels, setDraftModels] = useState<Record<string, { providerId: string; modelId: string }>>({});
   const [providerId, setProviderId] = useState('');
   const [modelId, setModelId] = useState('');
@@ -88,6 +92,7 @@ export default function App() {
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, boolean>>({});
   const [pendingStops, setPendingStops] = useState<Record<string, boolean>>({});
   const sendLocks = useRef(new Set<string>());
+  const importLocks = useRef(new Set<string>());
   const [healthPending, setHealthPending] = useState(false);
   const [renameId, setRenameId] = useState('');
   const [renameTitle, setRenameTitle] = useState('');
@@ -119,12 +124,14 @@ export default function App() {
   const actionPending = Boolean(pendingActions[draftKey]);
   const approvalPending = Boolean(pendingApprovals[activeSessionId]);
   const stopPending = Boolean(pendingStops[activeSessionId]);
-  const draft = drafts[draftKey] || '';
+  const draft = drafts[draftKey] || emptyDraft(activeSession);
+  const importing = Boolean(pendingImports[draftKey]);
+  const interactionPending = Boolean(pendingInteractions[activeSessionId]);
   const providers = boot?.settings.providers || [];
   const choices = providers.filter(p => p.enabled !== false).flatMap(p => providerModels(p).filter(m => m.enabled).map(m => ({ provider: p, model: m })));
   const requestedProviderId = providerId || providers[0]?.id;
   const choice = choices.find(c => c.provider.id === requestedProviderId && (!modelId || c.model.id === modelId));
-  const provider = choice ? { ...choice.provider, model: choice.model.id, contextWindow: choice.model.contextWindow, maxTokens: choice.model.maxTokens } : undefined;
+  const provider = choice ? { ...choice.provider, model: choice.model.id, contextWindow: choice.model.contextWindow, maxTokens: choice.model.maxTokens, supportsImages: choice.model.supportsImages ?? choice.provider.supportsImages } : undefined;
   useEffect(() => {
     if (!activeSessionId) return;
     setDraftModels(previous => {
@@ -235,9 +242,9 @@ export default function App() {
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 170)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
     }
-  }, [draft, boot?.settings.fontSize]);
+  }, [draft.text, boot?.settings.fontSize]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === ',') { event.preventDefault(); openSettings(); }
@@ -307,7 +314,7 @@ export default function App() {
     const session = await window.localcode.createSession(projectId);
     putSession(session);
     const prompt = t('$create-desktop-pet\n请使用桌宠定制 Skill，为当前项目创建一个 LocalCode 虚拟宠物。\n名称：{name}\n角色与风格：{description}\n先读取 Skill，使用我选择的模型完成设计与制作流程。需要生图时检查图片 API 配置，缺少时说明所需配置，不要把聊天 API 当作图片 API。产物保存在项目内的新目录，输出通过校验的 pet.json 和 pet.png，并说明预览与导入方式。', { name: input.name, description: input.description || t('请先和我确认角色外观与风格。') });
-    setDrafts(previous => ({ ...previous, [session.id]: prompt }));
+    setDrafts(previous => ({ ...previous, [session.id]: { ...emptyDraft(session), text: prompt } }));
     setDraftModels(previous => ({ ...previous, [session.id]: { providerId: provider?.id || providerId, modelId: provider?.model || modelId } }));
     if (navigation !== navigationRevision.current) return;
     setActiveProjectId(projectId); setActiveSessionId(session.id); setDirectory(''); setFileView(null);
@@ -329,13 +336,63 @@ export default function App() {
     catch (failure) { setError(errorText(failure)); }
   };
 
+  const updateDraft = (patch: Partial<ComposerDraft>, key = draftKey) => {
+    const fallback = emptyDraft(sessions.find(session => session.id === key));
+    setDrafts(previous => ({ ...previous, [key]: { ...(previous[key] || fallback), ...patch } }));
+  };
+
+  const attach = async (files?: File[], folders = false) => {
+    const key = draftKey;
+    if (importLocks.current.has(key) || pendingActions[key]) return;
+    const base = draft;
+    const attachmentDraftKey = base.attachmentDraftKey || key;
+    importLocks.current.add(key);
+    setPendingImports(previous => ({ ...previous, [key]: 1 }));
+    try {
+      if (files && !files.length) return;
+      if (files && base.attachments.length + files.length > 10) throw new Error('每条消息最多添加 10 个附件。');
+      if (files?.some(file => file.size > 10 * 1024 * 1024)) throw new Error('单个图片不能超过 10 MiB，文本不能超过 2 MiB。');
+      if (files && files.reduce((total, file) => total + file.size, base.attachments.reduce((total, file) => total + file.size, 0)) > 50 * 1024 * 1024) throw new Error('每条消息的附件总大小不能超过 50 MiB。');
+      const imported = files ? await window.localcode.importAttachments({ draftKey: attachmentDraftKey, files: await Promise.all(files.map(file => new Promise<{ name: string; data: string }>((resolve, reject) => {
+        const reader = new FileReader(); reader.onerror = () => reject(new Error(`无法读取 ${file.name}`));
+        reader.onload = () => resolve({ name: file.name, data: String(reader.result).split(',')[1] || '' }); reader.readAsDataURL(file);
+      }))) }) : await window.localcode.pickAttachments({ draftKey: attachmentDraftKey, folders });
+      if (!imported.length) return;
+      if (base.attachments.length + imported.length > 10) throw new Error('每条消息最多添加 10 个附件，请先移除部分附件。');
+      if (base.attachments.reduce((total, item) => total + item.size, 0) + imported.reduce((total, item) => total + item.size, 0) > 50 * 1024 * 1024) throw new Error('每条消息的附件总大小不能超过 50 MiB。');
+      // Attach to the originating draft even when a picker or import finishes after navigation.
+      setDrafts(previous => { const current = previous[key] || base; return { ...previous, [key]: { ...current, attachmentDraftKey, attachments: [...current.attachments, ...imported] } }; });
+    } catch (failure) { setError(errorText(failure)); }
+    finally { importLocks.current.delete(key); setPendingImports(previous => ({ ...previous, [key]: 0 })); }
+  };
+
+  const interaction = async (sessionId: string, action: () => Promise<unknown>) => {
+    if (pendingInteractions[sessionId]) return;
+    setPendingInteractions(previous => ({ ...previous, [sessionId]: true }));
+    try { await action(); await refresh(); }
+    catch (failure) { setError(errorText(failure)); }
+    finally { setPendingInteractions(previous => ({ ...previous, [sessionId]: false })); }
+  };
+
+  const acceptPlan = () => {
+    const session = activeSession;
+    if (!session?.plan || !provider || busy || interactionPending) return;
+    void interaction(session.id, async () => {
+      await window.localcode.acceptPlan({ sessionId: session.id, planId: session.plan!.id, providerId: provider.id, modelId: provider.model });
+      updateDraft({ workMode: 'execute' }, session.id);
+    });
+  };
+
   const send = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    const prompt = draft.trim();
-    if (!prompt || busy || sendLocks.current.has(draftKey) || !provider) return;
+    const prompt = draft.text.trim() || draft.goal?.objective || '';
+    if ((!prompt && !draft.attachments.length) || busy || importing || sendLocks.current.has(draftKey) || !provider) return;
+    if (draft.attachments.some(item => item.kind === 'image') && provider.supportsImages !== true) { setError('请先选择支持图片的模型。'); return; }
+    if (draft.goal && provider.kind === 'ollama') { setError('目标模式需要外部模型。'); return; }
     const navigation = navigationRevision.current;
     const oldDraftKey = draftKey;
     let targetId = activeSessionId;
+    let accepted = false;
     sendLocks.current.add(oldDraftKey);
     setPendingActions(previous => ({ ...previous, [oldDraftKey]: true })); setError(''); setNotice(''); setAtBottom(true);
     try {
@@ -344,13 +401,27 @@ export default function App() {
       targetId = session.id;
       sendLocks.current.add(targetId);
       setPendingActions(previous => ({ ...previous, [targetId]: true }));
-      await window.localcode.send({ sessionId: session.id, prompt, providerId: provider.id, modelId: provider.model });
-      setDrafts(previous => ({ ...previous, [oldDraftKey]: '', [session!.id]: '' }));
+      await window.localcode.send({ sessionId: session.id, prompt, providerId: provider.id, modelId: provider.model, draftKey: draft.attachmentDraftKey || oldDraftKey, attachmentIds: draft.attachments.map(item => item.id), approvalMode: draft.approvalMode, workMode: draft.workMode, goal: draft.goal });
+      accepted = true;
+      const cleared = { ...draft, text: '', attachments: [], attachmentDraftKey: undefined, originDraft: undefined, goal: undefined };
+      setDrafts(previous => {
+        const next = { ...previous, [oldDraftKey]: cleared, [session!.id]: cleared };
+        const origin = draft.originDraft;
+        if (origin && previous[origin.key] && draftSignature(previous[origin.key]) === origin.signature) next[origin.key] = cleared;
+        return next;
+      });
       const revision = eventRevision.current;
       const current = await window.localcode.openSession(session.id);
       if (revision === eventRevision.current) putSession(current);
       else void refresh().catch(failure => setError(errorText(failure)));
-    } catch (failure) { setError(errorText(failure)); }
+    } catch (failure) {
+      // Creating a task can succeed before sending fails. Keep its visible draft too.
+      if (!accepted && targetId && targetId !== oldDraftKey) setDrafts(previous => {
+        const original = previous[oldDraftKey] || draft;
+        return { ...previous, [targetId]: { ...original, originDraft: original.originDraft || { key: oldDraftKey, signature: draftSignature(original) } } };
+      });
+      setError(accepted ? `任务已发送，但暂时未能刷新会话：${errorText(failure)}` : errorText(failure));
+    }
     finally {
       sendLocks.current.delete(oldDraftKey); sendLocks.current.delete(targetId);
       setPendingActions(previous => ({ ...previous, [oldDraftKey]: false, [targetId]: false }));
@@ -365,12 +436,12 @@ export default function App() {
     try { await window.localcode.stop(sessionId); } catch (failure) { setError(errorText(failure)); }
     finally { setPendingStops(previous => ({ ...previous, [sessionId]: false })); }
   };
-  const approve = async (allow: boolean) => {
+  const approve = async (allow: boolean, scope?: 'once' | 'session') => {
     const approval = activeSession?.approval;
     if (!approval || approvalPending) return;
     const sessionId = activeSessionId;
     setPendingApprovals(previous => ({ ...previous, [sessionId]: true }));
-    try { await window.localcode.approve({ runId: approval.runId, approvalId: approval.id, allow }); }
+    try { await window.localcode.approve({ runId: approval.runId, approvalId: approval.id, allow, scope }); }
     catch (failure) { setError(errorText(failure)); }
     finally { setPendingApprovals(previous => ({ ...previous, [sessionId]: false })); }
   };
@@ -476,30 +547,25 @@ export default function App() {
                 { icon: Search, title: t("理解这个项目"), text: t("浏览项目目录，概括主要文件和入口。暂时不要修改文件。") },
                 { icon: Code2, title: t("完成一个小改动"), text: t("我想完成一个小改动。先查看项目结构，等我说明具体需求。") },
                 { icon: ShieldCheck, title: t("检查现有代码"), text: t("查看项目中的关键代码，找出一个值得修复的问题，先解释依据。") },
-              ].map(item => <button className="starter-card" key={item.title} onClick={() => { setDrafts(previous => ({ ...previous, [draftKey]: item.text })); textareaRef.current?.focus(); }}><item.icon size={18} strokeWidth={1.6} /><span>{item.title}</span><ArrowUpRight size={13} /></button>)}
+              ].map(item => <button className="starter-card" key={item.title} onClick={() => { updateDraft({ text: item.text }); textareaRef.current?.focus(); }}><item.icon size={18} strokeWidth={1.6} /><span>{item.title}</span><ArrowUpRight size={13} /></button>)}
             </div>
           </>}
         </div> : <div className="message-list">
           <ConversationTimeline messages={activeSession.messages} tools={activeSession.tools} runs={activeSession.runs || []} status={activeSession.status} />
-          {busy && !activeSession.approval && <ProgressIndicator progress={activeSession.progress} />}
+          {busy && !activeSession.approval && !activeSession.question && <ProgressIndicator progress={activeSession.progress} />}
           {activeSession.error && <div className="inline-error"><AlertCircle size={16} /><div><strong>{t("任务遇到问题")}</strong><p>{t(activeSession.error)}</p></div></div>}
         </div>}
       </div>
       {!atBottom && <button className="scroll-bottom icon-button" title={t("回到最新消息")} aria-label={t("回到最新消息")} onClick={() => { setAtBottom(true); if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}><ArrowDown size={17} /></button>}
       <div className="composer-area">
-        {notice && <div className="notice-banner"><Sparkles size={14} /><span>{t(notice)}</span><button className="icon-button" aria-label={t("关闭提示")} onClick={() => setNotice('')}><X size={13} /></button></div>}
-        {activeSession?.approval && <div className="approval-card" role="region" aria-label={t("命令执行确认")}>
-          <div className="approval-heading"><span className="approval-icon"><Terminal size={17} /></span><div><strong>{t("这条命令需要你的确认")}</strong><p>{t("以当前 Windows 用户权限运行")}</p></div></div>
-          <div className="approval-cwd"><Folder size={12} /><span>{activeSession.approval.cwd}</span></div>
-          <pre className="approval-command">{activeSession.approval.command}</pre>
-          <div className="approval-footer"><span>{t("确认仅对这一次命令生效")}</span><button className="secondary-button" disabled={approvalPending} onClick={() => void approve(false)}>{t("拒绝")}</button><button className="primary-button" disabled={approvalPending} onClick={() => void approve(true)}>{approvalPending ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t("允许执行")}</button></div>
-        </div>}
+        {notice && <div className="notice-banner"><Sparkles size={14} /><span>{notice}</span><button className="icon-button" aria-label={t("关闭提示")} onClick={() => setNotice('')}><X size={13} /></button></div>}
+        {activeSession?.goal && <GoalCard goal={activeSession.goal} pending={interactionPending} busy={busy} local={provider?.kind === 'ollama'} planMode={draft.workMode === 'plan'} onControl={(action, budgetMs) => { const session = activeSession; void interaction(session.id, () => window.localcode.controlGoal({ sessionId: session.id, goalId: session.goal!.id, action, budgetMs, ...(action === 'resume' && provider ? { providerId: provider.id, modelId: provider.model } : {}) })); }} />}
+        {activeSession?.approval && <ApprovalCard approval={activeSession.approval} pending={approvalPending} onAnswer={(allow, scope) => void approve(allow, scope)} />}
+        {activeSession?.question && <QuestionCard key={activeSession.question.id} question={activeSession.question} pending={interactionPending} onAnswer={answers => { const session = activeSession, question = session.question!; void interaction(session.id, () => window.localcode.answerQuestion({ sessionId: session.id, runId: question.runId, questionId: question.id, answers })); }} onStop={() => void stop()} />}
+        {activeSession?.plan && <PlanCard key={activeSession.plan.id} plan={activeSession.plan} busy={busy} pending={interactionPending} onAccept={acceptPlan} onRevise={() => { updateDraft({ workMode: 'plan' }); textareaRef.current?.focus(); }} />}
         <div className="composer-context"><ProjectPicker projects={boot?.projects || []} value={activeProjectId || null} disabled={busy || actionPending || Boolean(activeSession?.projectId)} onChange={chooseWorkspace} onCreate={() => void openProject(activeSession && !activeSession.projectId ? activeSession.id : undefined)} /><span className="computer-context"><Monitor size={14} />{t("此计算机")}</span></div>
-        <form className="composer" onSubmit={event => void send(event)}>
-          <textarea ref={textareaRef} aria-label={t("任务输入")} value={draft} rows={2} placeholder={project ? t('和 LocalCode 一起工作') : t('随心输入')} disabled={actionPending} onChange={event => setDrafts(previous => ({ ...previous, [draftKey]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!busy) void send(); } }} />
-          <div className="composer-toolbar"><div className="composer-options"><button className="icon-button" type="button" title={t("打开项目文件夹")} aria-label={t("添加工作项目")} onClick={() => void openProject()}><Plus size={19} /></button><span className="composer-permission" title={project ? t('文件修改自动执行；每条终端命令需单独确认') : t('未指定工作区，可直接对话')}>{project ? <ShieldCheck size={13} /> : <MessageSquare size={13} />}<span>{project ? t('命令需确认') : t('自由对话')}</span></span></div><div className="composer-submit"><ModelPicker choices={choices} selected={choice} disabled={busy || actionPending || settingsOpen} onChange={next => { setProviderId(next.provider.id); setModelId(next.model.id); }} />{busy ? <button type="button" className="stop-button" aria-label={t("停止任务")} title={t("仅停止此会话的任务")} disabled={stopPending} onClick={() => void stop()}>{stopPending ? <LoaderCircle size={14} className="spin" /> : <Square size={12} fill="currentColor" />}</button> : <button className="send-button" type="submit" aria-label={t("发送任务")} disabled={!draft.trim() || actionPending || !provider}>{actionPending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}</button>}</div></div>
-        </form>
-        <div className="composer-caption"><ShieldCheck size={11} /><span>{provider && provider.kind !== 'ollama' ? t("云端模型 · 仅在手动选择时调用") : t("本地模型 · 对话保存在这台电脑")} </span>{busySession && busySession.id !== activeSessionId && <button onClick={() => void openSession(busySession)}>{t("查看正在运行的任务")}</button>}</div>
+        <Composer key={draftKey} draft={draft} onChange={updateDraft} textareaRef={textareaRef} choices={choices} selected={choice} onModel={next => { setProviderId(next.provider.id); setModelId(next.model.id); }} busy={busy} pending={actionPending} importing={importing} stopPending={stopPending} settingsOpen={settingsOpen} projectName={project?.name} goal={activeSession?.goal} onSend={() => void send()} onStop={() => void stop()} onPick={folders => void attach(undefined, folders)} onImport={files => void attach(files)} />
+        <div className="composer-caption"><ShieldCheck size={11} /><span>{provider && provider.kind !== 'ollama' ? t("外部模型 · 使用你选择的供应商") : t("本地模型 · 对话保存在这台电脑")} </span>{busySession && busySession.id !== activeSessionId && <button onClick={() => void openSession(busySession)}>{t("查看正在运行的任务")}</button>}</div>
       </div>
     </main>
 
@@ -556,7 +622,11 @@ function MessageCopy({ message }: { message: ChatMessage }) {
 }
 
 function Message({ message }: { message: ChatMessage }) {
-  if (message.role === 'user') return <div className="user-message"><div>{message.text}</div></div>;
+  if (message.role === 'user') {
+    if (message.automatic) return <div className="automatic-message"><RefreshCw size={12} /><span>继续推进目标</span></div>;
+    if (message.attachments?.length) return <div className="user-message with-attachments"><div className="user-message-content"><AttachmentStrip attachments={message.attachments} />{message.text && <div className="user-message-text">{message.text}</div>}</div></div>;
+    return <div className="user-message"><div>{message.text}</div></div>;
+  }
   if (!message.text && !message.parts?.length) return null;
   return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><BrandLogo /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}</div></article>;
 }
