@@ -296,8 +296,8 @@ async function createWindow() {
     try {
       const url = new URL(request.url);
       if (url.hostname !== 'app' || request.method !== 'GET') return new Response('Forbidden', { status: 403 });
-      const petAsset = /^\/pets\/(paimon|ronova)\.png$/.exec(url.pathname);
-      if (petAsset) { const bytes = await pets.asset(petAsset[1] as 'paimon' | 'ronova'); return bytes ? new Response(new Uint8Array(bytes), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' } }) : new Response('Pet asset unavailable', { status: 404 }); }
+      const petAsset = /^\/pets\/(paimon|ronova|custom-[a-f0-9-]{36})\.png$/.exec(url.pathname);
+      if (petAsset) { const bytes = await pets.asset(petAsset[1]); return bytes ? new Response(new Uint8Array(bytes), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' } }) : new Response('Pet asset unavailable', { status: 404 }); }
       const filename = path.resolve(rendererRoot, '.' + decodeURIComponent(url.pathname || '/index.html'));
       if (!filename.startsWith(rendererRoot + path.sep)) return new Response('Forbidden', { status: 403 });
       const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };

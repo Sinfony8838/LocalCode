@@ -3,6 +3,7 @@ import { modelTranslations } from './locales/models';
 import { auxiliaryTranslations } from './locales/auxiliary';
 import { backendTranslations } from './locales/backend';
 import { taskTranslations } from './locales/tasks';
+import { petTranslations } from './locales/pets';
 
 export const APP_LOCALES = ['zh-CN', 'en', 'ja', 'ko'] as const;
 export type AppLocale = typeof APP_LOCALES[number];
@@ -12,7 +13,7 @@ export function isAppLocale(value: unknown): value is AppLocale {
   return typeof value === 'string' && (APP_LOCALES as readonly string[]).includes(value);
 }
 export const translations: Record<string, readonly [string, string, string]> = {
-  ...appTranslations, ...modelTranslations, ...auxiliaryTranslations, ...backendTranslations, ...taskTranslations,
+  ...appTranslations, ...modelTranslations, ...auxiliaryTranslations, ...backendTranslations, ...taskTranslations, ...petTranslations,
 };
 export type TranslationValues = Record<string, string | number>;
 

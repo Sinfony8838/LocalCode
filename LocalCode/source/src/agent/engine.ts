@@ -10,6 +10,7 @@ import type { AgentEvent, Approval, RunRequest, WorkerCommand, RunProgress } fro
 import { DEFAULT_LOCALE, isAppLocale, translate, type AppLocale } from '../shared/i18n.js';
 import { killActiveCommands } from '../core/command.js';
 import { createWorkspaceTools } from './tools.js';
+import { createSkillTool, PET_SKILL_DISCOVERY } from './skills.js';
 import { managedTransport, type RequestLease } from './transport.js';
 
 type EventBody = AgentEvent extends infer E ? E extends AgentEvent ? Omit<E, 'runId' | 'sessionId'> : never : never;
@@ -188,7 +189,7 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
     compaction: { enabled: true, reserveTokens: lowContext ? 1024 : 1536, keepRecentTokens: lowContext ? 1024 : 2048 },
     retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } }, cacheWarming: 'off',
   });
-  const customTools = request.projectPath ? strictTools(createWorkspaceTools(context)) : [];
+  const customTools = request.projectPath ? strictTools([...createWorkspaceTools(context), createSkillTool(context)]) : [];
   // The SDK needs a cwd even for chat. Its private transcript directory is not a workspace,
   // and no filesystem, command, resource discovery or built-in tools are exposed there.
   const cwd = request.projectPath || storage.directory;
@@ -203,7 +204,7 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   }
   const { session } = await createAgentSession({
     cwd, agentDir: path.join(request.dataDir, 'pi'), modelRuntime: runtime, model,
-    thinkingLevel: 'off', sessionManager, settingsManager, resourceLoader: isolatedResourceLoader(request.locale, request.projectPath ? SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT),
+    thinkingLevel: 'off', sessionManager, settingsManager, resourceLoader: isolatedResourceLoader(request.locale, request.projectPath ? SYSTEM_PROMPT + PET_SKILL_DISCOVERY : CHAT_SYSTEM_PROMPT),
     noTools: 'builtin', tools: customTools.map(tool => tool.name), customTools,
   });
   session.agent.toolExecution = 'sequential';

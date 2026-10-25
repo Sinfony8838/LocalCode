@@ -16,6 +16,6 @@ export function PetSprite({ character, animation = 'idle', size = 160, paused = 
   const column = direction === undefined || paused ? frame : direction % 8;
   const height = size * 208 / 192;
   const animationLabels: Record<PetAnimation, string> = { idle: '待机', 'running-right': '向右移动', 'running-left': '向左移动', waving: '挥手', jumping: '跳跃', failed: '遇到问题', waiting: '等待确认', running: '正在处理', review: '查看结果' };
-  return <span className="pet-sprite" role="img" aria-label={`${t(character.name)} · ${t(animationLabels[animation])}`} data-character={character.id} data-animation={animation} data-frame={column}
+  return <span className="pet-sprite" role="img" aria-label={`${character.id.startsWith('custom-') ? character.name : t(character.name)} · ${t(animationLabels[animation])}`} data-character={character.id} data-animation={animation} data-frame={column}
     style={{ display: 'block', width: size, height, backgroundImage: `url("./pets/${character.id}.png?v=${character.version}")`, backgroundSize: `${size * 8}px ${height * 11}px`, backgroundPosition: `${-size * column}px ${-height * row}px`, backgroundRepeat: 'no-repeat' }} />;
 }
