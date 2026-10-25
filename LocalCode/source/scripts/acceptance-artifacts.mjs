@@ -79,10 +79,11 @@ async function launch() {
 const state = id => page.evaluate(id => window.localcode.openSession(id), id);
 const terminal = (id, wanted = 'completed') => poll(async () => { const s = await state(id); if (['completed', 'failed', 'interrupted'].includes(s.status)) { assert.equal(s.status, wanted, s.error); return s; } }, `${id}: ${wanted}`);
 async function select(id) {
-  const s = await state(id);
   const expand = page.getByRole('button', { name: '展开侧边栏', exact: true });
   if (await expand.count()) await expand.click();
-  await page.locator('.session-button').filter({ hasText: s.title }).click();
+  const row = page.locator(`.session-row[data-session-id="${id}"]`);
+  await row.locator('.session-button').click();
+  await poll(async () => (await row.getAttribute('class')).split(/\s+/).includes('active'), `selected ${id}`);
 }
 async function send(id, prompt) { const result = await page.evaluate(({ id, prompt }) => window.localcode.send({ sessionId: id, providerId: 'artifacts-fixture', prompt }), { id, prompt }); await select(id); return result.runId; }
 async function newSession(prompt) { const s = await page.evaluate(id => window.localcode.createSession(id), projectId); await send(s.id, prompt); return s.id; }
@@ -101,26 +102,60 @@ try {
     { text: '阶段性说明：正在创建网页，稍后继续检查。', tool: { name: 'write_file', args: { path: 'demo.html', content: html } } },
     { gate: afterFirst.promise, text: '阶段性说明：现在更新项目记录。', tool: { name: 'edit_file', args: { path: 'notes.txt', oldText: 'Existing user note', newText: 'Existing user note\nFirst completed round' } } },
     { tool: { name: 'edit_file', args: { path: 'demo.html', oldText: '<p id="stage">初稿</p>', newText: '<p id="stage">最终网页</p>' } } },
-    { gate: finalGate.promise, text: '已创建可交互网页，并更新项目记录。\n\n- 文件：[打开网页](demo.html)、[项目记录](notes.txt)\n- 参考：[外部参考链接](https://example.com/localcode-reference)\n- 验证：文件写入已完成；实际浏览器效果请通过预览查看。' },
+    { gate: finalGate.promise, text: '已创建可交互网页，并更新 `notes.txt`。\n\n- 文件：[打开网页](demo.html)、[项目记录](notes.txt)\n- 参考：[外部参考链接](https://example.com/localcode-reference)\n- 验证：文件写入已完成；实际浏览器效果请通过预览查看。' },
   );
   const id = await newSession('ARTIFACT_COMPLETION_ROUND_ONE');
   const firstRun = (await state(id)).runId;
   await poll(async () => { const s = await state(id); return s.tools.length === 1 && s.tools[0].status === 'completed' && s.messages.some(m => m.role === 'assistant' && !m.partial && m.text.includes('阶段性说明')); }, 'intermediate message ended');
-  const intermediateCopy = page.locator('.assistant-message').filter({ hasText: '阶段性说明：正在创建网页' }).getByRole('button', { name: '复制回答', exact: true });
-  await intermediateCopy.waitFor({ state: 'visible' });
-  assert(await intermediateCopy.count());
-  assert.equal(await summaries().count(), 0, 'An ended/copyable intermediate message must not complete a run');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0, 'Intermediate replies must not expose a copy action');
+  assert.equal(await summaries().count(), 0, 'An ended intermediate message must not complete a run');
+  assert.equal(await page.locator('.tool-file-action').count(), 0, 'No separate file-action row');
+  const toolLink = page.locator('.tool-summary-row').getByRole('link', { name: '打开文件 demo.html', exact: true });
+  await toolLink.waitFor();
+  assert.equal(await toolLink.locator('.artifact-link-icon').count(), 1);
+  assert.equal(await page.locator('button .artifact-link').count(), 0, 'File links must not be nested inside toggle buttons');
+  const alignment = await toolLink.evaluate(link => {
+    const file = link.getBoundingClientRect(), label = link.parentElement.querySelector('.tool-label').getBoundingClientRect();
+    return Math.abs(file.top + file.height / 2 - label.top - label.height / 2);
+  });
+  assert(alignment <= 2, `Tool filename must share the label row: ${alignment}px`);
+  await toolLink.click(); await page.locator('iframe[title="文件预览"]').waitFor();
+  assert.equal(await page.getByRole('button', { name: '展开写入文件详情', exact: true }).getAttribute('aria-expanded'), 'false');
+  await page.getByRole('button', { name: '关闭文件预览', exact: true }).click();
+  await page.getByRole('button', { name: '展开写入文件详情', exact: true }).click();
+  assert.match(await page.locator('.tool-details').innerText(), /demo\.html/);
+  await page.getByRole('button', { name: '收起写入文件详情', exact: true }).click();
   await page.screenshot({ path: path.join(root, '01-intermediate-no-summary.png') });
   afterFirst.release();
   await poll(async () => (await state(id)).tools.filter(t => t.status === 'completed').length === 3, 'all writes before final');
   assert.equal(await summaries().count(), 0, 'Completed tools must not create completion summaries before final settled');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0);
   finalGate.release(); await terminal(id);
   await runCard(firstRun).waitFor(); assert.equal(await summaries().count(), 1);
   assert.equal(await runCard(firstRun).getAttribute('aria-label'), '本轮运行记录');
   assert(!(await runCard(firstRun).innerText()).includes('不代表测试或任务验收通过'));
   assert.match(await runCard(firstRun).innerText(), /2\s*个文件/);
   assert.match(await runCard(firstRun).innerText(), /demo\.html/); assert.match(await runCard(firstRun).innerText(), /notes\.txt/);
-  checks.push('Copyable intermediate messages and completed tools produce no summary; one settled run creates one summary and deduplicates three writes into two files');
+  const firstState = await state(id);
+  const firstFinal = firstState.messages.find(message => message.id === firstState.runs.find(run => run.runId === firstRun).finalMessageId);
+  const firstCopy = page.locator(`.reply-actions[data-run-id="${firstRun}"]`).getByRole('button', { name: '复制回答', exact: true });
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 1);
+  await firstCopy.click();
+  await poll(async () => await firstCopy.getAttribute('title') === '已复制', 'final reply copied');
+  assert(await app.evaluate(async ({ clipboard }, expected) => (await clipboard.readText()).replace(/\r\n/g, '\n') === expected.replace(/\r\n/g, '\n'), firstFinal.text), 'Clipboard must contain only the final fixture reply (Windows line endings normalized)');
+  assert.equal(await page.locator('.assistant-message .message-copy').count(), 0);
+  assert.equal(await page.locator('.markdown-body .artifact-link .artifact-link-icon').count(), 3);
+  const inlineCodeFile = page.locator('.markdown-body p').getByRole('link', { name: 'notes.txt', exact: true });
+  const inlineStyle = await poll(() => inlineCodeFile.evaluate(link => {
+    const code = link.querySelector('code'), paragraph = link.parentElement;
+    if (!link.isConnected || !code || !paragraph) return null;
+    return { display: getComputedStyle(link).display, codeBorder: getComputedStyle(code).borderWidth, codeFont: getComputedStyle(code).fontFamily, proseFont: getComputedStyle(paragraph).fontFamily };
+  }), 'inline code file rendered after final state refresh');
+  assert.equal(inlineStyle.display, 'inline'); assert.equal(inlineStyle.codeBorder, '0px'); assert.equal(inlineStyle.codeFont, inlineStyle.proseFont);
+  await inlineCodeFile.click(); await page.locator('.artifact-source').waitFor();
+  assert.match(await page.locator('.artifact-source').innerText(), /First completed round/);
+  await page.getByRole('button', { name: '关闭文件预览', exact: true }).click();
+  checks.push('Intermediate/tool/streaming replies have no copy action; one completed run has one final-summary copy containing only the final text; inline tool filenames open previews independently of details');
   await page.screenshot({ path: path.join(root, '02-completed-two-files.png') });
   await page.getByRole('link', { name: '外部参考链接', exact: true }).click();
   await poll(async () => (await app.evaluate(() => globalThis.externalOpenCalls)).length === 1, 'main-frame Markdown external link dispatched');
@@ -195,6 +230,7 @@ try {
   );
   const secondRun = await send(id, 'ARTIFACT_COMPLETION_ROUND_TWO'); await terminal(id); await runCard(secondRun).waitFor();
   assert.equal(await summaries().count(), 2); assert.match(await runCard(secondRun).innerText(), /1\s*个文件/);
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 2);
   assert(!(await runCard(secondRun).innerText()).includes('demo.html')); assert.match(await runCard(firstRun).innerText(), /2\s*个文件/);
   checks.push('Second round displays only its own one modified file; first-round two-file summary remains in history');
 
@@ -216,7 +252,7 @@ try {
   };
   for (const link of [
     runCard(percentRun).getByRole('link', { name: '打开文件 report%20final.html', exact: true }),
-    page.locator('.tool-file-action').getByRole('link', { name: '打开文件 report%20final.html', exact: true }),
+    page.locator('.tool-summary-row').getByRole('link', { name: '打开文件 report%20final.html', exact: true }),
     page.locator('.markdown-body').getByRole('link', { name: 'report%20final.html', exact: true }),
     page.getByRole('link', { name: '百分号文件', exact: true }),
     page.getByRole('link', { name: '图片目标链接', exact: true }),
@@ -243,9 +279,11 @@ try {
   const interruptedId = await newSession('ARTIFACT_INTERRUPTED');
   await page.locator('.assistant-message').filter({ hasText: '尚未完成，仍在生成。' }).waitFor(); assert.equal(await summaries().count(), 0);
   await page.getByRole('button', { name: '停止任务', exact: true }).click(); await terminal(interruptedId, 'interrupted');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0);
   await summaries().waitFor(); assert(!(await summaries().innerText()).includes('本轮运行结束')); interruptedGate.release();
   queue.push({ error: 401 }); const failedId = await newSession('ARTIFACT_FAILED'); await terminal(failedId, 'failed');
   await summaries().waitFor(); assert(!(await summaries().innerText()).includes('本轮运行结束'));
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0);
   checks.push('User stop and provider failure keep explicit interrupted/failed summaries and never show completed');
 
   await select(id);
@@ -263,6 +301,7 @@ try {
   await page.keyboard.press('Escape'); await page.getByRole('menu').waitFor({ state: 'detached' }); assert.equal(await page.getByRole('menu').count(), 0);
   await app.close(); app = undefined; await launch(); await select(id);
   await poll(async () => await summaries().count() === 2, 'persisted per-run summaries');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 2);
   assert.match(await runCard(firstRun).innerText(), /2\s*个文件/); assert.match(await runCard(secondRun).innerText(), /1\s*个文件/);
   assert.equal((await state(interruptedId)).status, 'interrupted'); assert.equal((await state(failedId)).status, 'failed');
   await page.screenshot({ path: path.join(root, '06-restarted-history.png') });

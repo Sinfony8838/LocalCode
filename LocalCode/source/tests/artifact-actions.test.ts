@@ -80,4 +80,8 @@ describe('native artifact actions', () => {
     const f = await fixture(); native.openPath.mockResolvedValue('No associated app');
     await expect(f.artifacts.action(f.project, f.filename, 'open')).rejects.toThrow(/No associated app/);
   });
+  it('awaits native clipboard errors instead of reporting a completed copy', async () => {
+    const f = await fixture(); native.clipboard.mockRejectedValueOnce(new Error('clipboard unavailable'));
+    await expect(f.artifacts.action(f.project, f.filename, 'copy-path')).rejects.toThrow('clipboard unavailable');
+  });
 });

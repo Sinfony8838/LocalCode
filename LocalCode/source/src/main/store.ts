@@ -2,10 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, Theme } from '../shared/contracts';
+import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, Theme, SidebarPreferences } from '../shared/contracts';
 import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import { reduceAgentEvent } from '../shared/session-events';
-import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
+import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_SIDEBAR } from '../shared/contracts';
 import { beginRunChanges, discardRunChanges, finishRunChanges, recoverRunChanges } from '../core/run-changes';
 
 interface Index { version: 1; projects: Project[]; sessions: SessionView[]; settings: AppSettings; keys: Record<string, string> }
@@ -35,7 +35,9 @@ export class Store {
     }
     const fontSize = this.state.settings.fontSize;
     if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) this.state.settings.fontSize = DEFAULT_FONT_SIZE;
+    this.state.settings.sidebar = { ...DEFAULT_SIDEBAR, ...this.state.settings.sidebar, collapsedProjects: this.state.settings.sidebar?.collapsedProjects || [] };
     for (const session of this.state.sessions) {
+      session.projectId ??= null;
       if (session.status === 'running' || session.status === 'awaiting_approval') {
         session.status = 'interrupted'; session.error = '上次运行被中断。不会自动重放命令，可以发送新消息继续。';
       }
@@ -43,7 +45,7 @@ export class Store {
         run.status = 'interrupted'; run.endedAt = session.updatedAt;
         delete run.finalMessageId;
         run.durationMs = Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt));
-        Object.assign(run, await recoverRunChanges(this.dataDir, session.id, run.runId));
+        Object.assign(run, session.projectId ? await recoverRunChanges(this.dataDir, session.id, run.runId) : { changes: [], changeScope: 'file_tools' as const });
       }
       session.messages.filter(m => m.partial).forEach(m => { m.partial = false; });
       for (const message of session.messages) for (const part of message.parts ?? []) if (part.state === 'streaming') { part.state = 'interrupted'; part.endedAt = new Date().toISOString(); }
@@ -101,11 +103,33 @@ export class Store {
     const project = { id: randomUUID(), name: path.basename(canonical) || canonical, path: canonical, createdAt: new Date().toISOString() };
     this.state.projects.push(project); await this.persist(); return structuredClone(project);
   }
-  async createSession(projectId: string) {
-    this.project(projectId);
+  async createSession(projectId: string | null = null) {
+    if (projectId !== null) this.project(projectId);
     const now = new Date().toISOString();
     const session: SessionView = { id: randomUUID(), projectId, title: '新会话', createdAt: now, updatedAt: now, providerId: 'local', status: 'idle', messages: [], tools: [] };
     this.state.sessions.unshift(session); await this.persist(); return structuredClone(session);
+  }
+  async moveSession(sessionId: string, projectId: string) {
+    this.project(projectId);
+    const session = this.session(sessionId);
+    if (session.status === 'running' || session.status === 'awaiting_approval') throw new Error('请等待任务结束后再移入项目。');
+    if (session.projectId === projectId) return structuredClone(session);
+    // A projectless transcript has no workspace journal to rebind or move.
+    if (session.projectId) throw new Error('此任务已属于项目；可在目标项目中新建任务。');
+    session.projectId = projectId; session.updatedAt = new Date().toISOString();
+    await this.persist(); return structuredClone(session);
+  }
+  async setProjectPinned(projectId: string, pinned: boolean) {
+    const project = this.project(projectId); project.pinned = pinned;
+    await this.persist(); return structuredClone(project);
+  }
+  async setSidebar(patch: Partial<SidebarPreferences>) {
+    for (const [key, value] of Object.entries(patch)) {
+      if (key === 'collapsedProjects') { if (!Array.isArray(value)) throw new Error('折叠项目设置无效'); value.forEach(id => this.project(id)); }
+      else if (!['pinnedCollapsed', 'projectsCollapsed', 'recentCollapsed'].includes(key) || typeof value !== 'boolean') throw new Error('侧栏设置无效');
+    }
+    this.state.settings.sidebar = { ...DEFAULT_SIDEBAR, ...this.state.settings.sidebar, ...patch };
+    await this.persist(); return structuredClone(this.state.settings.sidebar);
   }
   async renameSession(id: string, title: string) { const s = this.session(id); s.title = title; await this.persist(); return structuredClone(s); }
   async beginRun(sessionId: string, prompt: string, providerId: string, modelId?: string) {
@@ -116,7 +140,7 @@ export class Store {
       previous.status = 'interrupted'; previous.endedAt = new Date().toISOString();
       delete previous.finalMessageId;
       previous.durationMs = Math.max(0, Date.parse(previous.endedAt) - Date.parse(previous.startedAt));
-      Object.assign(previous, await recoverRunChanges(this.dataDir, sessionId, previous.runId));
+      Object.assign(previous, s.projectId ? await recoverRunChanges(this.dataDir, sessionId, previous.runId) : { changes: [], changeScope: 'file_tools' as const });
     }
     s.runId = randomUUID(); s.status = 'running'; s.providerId = providerId; s.error = undefined; s.approval = undefined;
     delete s.progress;
@@ -126,7 +150,7 @@ export class Store {
     s.messages.push({ id: randomUUID(), role: 'user', text: prompt, createdAt: s.updatedAt, runId: s.runId });
     const run = { runId: s.runId, startedAt: s.updatedAt, status: 'running' as const, changes: [], changeScope: 'workspace_snapshot' as const };
     (s.runs ??= []).push(run);
-    try { await beginRunChanges(this.dataDir, sessionId, s.runId, this.project(s.projectId).path); }
+    try { if (s.projectId) await beginRunChanges(this.dataDir, sessionId, s.runId, this.project(s.projectId).path); }
     catch { /* Settlement explicitly reports unavailable baseline; model work may still proceed. */ }
     await this.persist(); return structuredClone(s);
   }
@@ -141,7 +165,7 @@ export class Store {
     if (run && run.status !== 'running') return event;
     if (event.type === 'settled' && run) {
       const endedAt = event.recordedAt!;
-      const evidence = await finishRunChanges(this.dataDir, event.sessionId, event.runId, this.project(current.projectId).path);
+      const evidence = current.projectId ? await finishRunChanges(this.dataDir, event.sessionId, event.runId, this.project(current.projectId).path) : { changes: [], changeScope: 'file_tools' as const };
       const finalMessageId = event.status === 'completed' ? run.finalMessageId : undefined;
       event = { ...event, summary: { ...run, ...evidence, status: event.status, endedAt, durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(run.startedAt)), finalMessageId } };
     }

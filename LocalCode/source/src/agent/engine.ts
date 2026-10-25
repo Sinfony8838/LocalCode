@@ -79,14 +79,17 @@ const SYSTEM_PROMPT = `你是 LocalCode，本机中文编程助手。只使用�
 阶段性回复只说明当前发现和下一步，不要在每次工具调用或模型消息结束时宣称整轮完成。
 只有本轮用户任务实际结束、不再调用工具时，给出一次简洁的中文最终总结：先说完成了什么，再说明实际验证结果、生成或修改的文件；若仍有失败、未验证或未完成事项，明确写出。不要虚构检查通过、文件数量或完成状态。
 文件链接使用项目相对路径，便于在应用内查看。修改数量和耗时由应用在整轮结束后统计，无需反复列举。`;
+const CHAT_SYSTEM_PROMPT = `你是 LocalCode，用中文帮助用户讨论问题、解释代码和规划任务。
+当前任务不在项目中工作，未指定工作区，也没有文件或终端工具。直接根据对话回答，不要求用户先创建文件夹。不要声称已读取、修改或运行本机文件；需要处理项目文件时提示用户选择项目或将此任务移入项目。
+中间说明保持简短，任务结束后给出一次清晰的最终回答，不虚构操作或验证结果。`;
 
 /** Never discovers resources from the project, home directory, or pi's global configuration. */
-export function isolatedResourceLoader(): ResourceLoader {
+export function isolatedResourceLoader(systemPrompt = SYSTEM_PROMPT): ResourceLoader {
   return {
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
     getSkills: () => ({ skills: [], diagnostics: [] }), getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }), getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => SYSTEM_PROMPT, getSystemPromptSource: () => undefined,
+    getSystemPrompt: () => systemPrompt, getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [],
     extendResources: () => {}, reload: async () => {},
   };
@@ -174,9 +177,12 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
     compaction: { enabled: true, reserveTokens: lowContext ? 1024 : 1536, keepRecentTokens: lowContext ? 1024 : 2048 },
     retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } }, cacheWarming: 'off',
   });
-  const customTools = strictTools(createWorkspaceTools(context));
-  const sessionManager = storage.file ? SessionManager.open(storage.file, storage.directory, request.projectPath)
-    : SessionManager.create(request.projectPath, storage.directory);
+  const customTools = request.projectPath ? strictTools(createWorkspaceTools(context)) : [];
+  // The SDK needs a cwd even for chat. Its private transcript directory is not a workspace,
+  // and no filesystem, command, resource discovery or built-in tools are exposed there.
+  const cwd = request.projectPath || storage.directory;
+  const sessionManager = storage.file ? SessionManager.open(storage.file, storage.directory, cwd)
+    : SessionManager.create(cwd, storage.directory);
   const key = cloudKey(request);
   if (key) {
     // AgentSession writes messages itself, before main-process/UI filtering can protect JSONL.
@@ -185,8 +191,8 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
       ? { ...message, errorMessage: transportError } : message, key));
   }
   const { session } = await createAgentSession({
-    cwd: request.projectPath, agentDir: path.join(request.dataDir, 'pi'), modelRuntime: runtime, model,
-    thinkingLevel: 'off', sessionManager, settingsManager, resourceLoader: isolatedResourceLoader(),
+    cwd, agentDir: path.join(request.dataDir, 'pi'), modelRuntime: runtime, model,
+    thinkingLevel: 'off', sessionManager, settingsManager, resourceLoader: isolatedResourceLoader(request.projectPath ? SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT),
     noTools: 'builtin', tools: customTools.map(tool => tool.name), customTools,
   });
   session.agent.toolExecution = 'sequential';
@@ -337,7 +343,7 @@ export class AgentEngine {
   }
 
   private requestApproval(run: ActiveRun, input: { command: string; cwd: string }, signal?: AbortSignal): Promise<boolean> {
-    if (run.controller.signal.aborted || signal?.aborted || this.active !== run) return Promise.resolve(false);
+    if (!run.request.projectPath || run.controller.signal.aborted || signal?.aborted || this.active !== run) return Promise.resolve(false);
     const approval: Approval = { ...input, id: randomUUID(), runId: run.request.runId, sessionId: run.request.sessionId };
     return new Promise(resolve => {
       const abort = () => finish(false);
@@ -460,6 +466,7 @@ export class AgentEngine {
         transportFailure: message => { run.failure ??= message; },
         requestApproval: (input, signal) => this.requestApproval(run, input, signal),
         beforeTool: () => {
+          if (!request.projectPath) throw new Error('当前任务未指定工作区，文件和命令工具不可用。');
           run.controller.signal.throwIfAborted();
           if (this.active !== run || run.budgetExhausted) throw new Error('当前任务已失效或已达到工具调用上限。');
         },

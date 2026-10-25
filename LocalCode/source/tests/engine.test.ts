@@ -41,6 +41,14 @@ function fakeEngine(killCommands: () => Promise<unknown> = async () => {}) {
 }
 
 describe('AgentEngine lifecycle and approval fencing', () => {
+  it('does not allow workspace tools or command approval in a projectless run', async () => {
+    const f = fakeEngine(), req = await request(); req.projectPath = '';
+    const done = f.engine.handle(req); await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    expect(() => f.contexts[0].beforeTool('write_file', {})).toThrow('未指定工作区');
+    expect(await f.contexts[0].requestApproval({ command: 'Get-ChildItem', cwd: '.' })).toBe(false);
+    expect(f.events.some(event => event.type === 'approval')).toBe(false);
+    f.sessions[0].settle(); await done; expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'completed' });
+  });
   it('preserves truncated output but never marks a length-limited answer completed', async () => {
     const f = fakeEngine(); const done = f.engine.handle(await request());
     await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));

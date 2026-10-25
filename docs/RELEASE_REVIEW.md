@@ -1,5 +1,28 @@
 # Open-source release review
 
+## 0.1.18 tasks, projects and conversation controls
+
+Reviewed on 2026-10-25 (Asia/Shanghai), integrating the latest public main including the typography update. Home now navigates without persisting empty conversations. Tasks can start without a workspace and later move into a project with their transcript and context intact. Projects support pinning and persistent collapsed groups. File links stay inline, and only a completed round's final answer has a copy action.
+
+Validation of this integrated source:
+
+| Check | Result |
+| --- | --- |
+| TypeScript and production build | PASS |
+| Unit/integration regression | PASS; 141 passed, 2 platform/interactive checks skipped |
+| Source Electron task/project, typography, artifact, checkpoint and model-setup suites | PASS |
+| Windows packaging and packaged artifact/typography/task-project/home suites | PASS |
+| Portable bundle allowlist | PASS; 3 passed, Windows symlink privilege check skipped |
+| Scanner positive/negative controls, exact staged-source credential comparison and Gitleaks | PASS |
+| npm install audit | PASS; 0 reported vulnerabilities |
+| Real Ollama/GPU inference and external cloud requests | UNRUN; only deterministic localhost providers used |
+
+The desktop suites use isolated application homes and synthetic project folders. They exercise initial projectless sends and continuation, retained context and project-scoped file writes after moving, busy-move rejection, draft preservation, delayed folder selection, pin/collapse persistence, inline file previews, final-only native clipboard copying, home navigation and restart. The existing external-link, literal-percent filename, checkpoint and model-setup controls are retained. Transient Windows rename retries are bounded to packaging staging/output directories.
+
+Evidence and packaged executables remain outside Git. Hosted CI must pass on the PR commit before merging. This source update does not publish a formal binary Release or resolve the separate application-data isolation release hold.
+
+---
+
 ## 0.1.13 turn summaries and artifact previews
 
 Reviewed on 2026-10-25 (Asia/Shanghai). This source update adds completion records only after an entire agent turn settles, independent per-turn file statistics, file opening menus, and isolated HTML/image previews. It retains the portable paths, validated model profile, configurable local budgets, dependency security override, packaging allowlist, and artwork exclusions from the 0.1.12 baseline below.
