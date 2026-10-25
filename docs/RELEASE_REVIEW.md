@@ -1,5 +1,13 @@
 # Open-source release review
 
+## 0.1.15 integrated candidate update — external acceptance still pending
+
+The isolation branch was integrated with main `741fd199ca6187ab881b19bddda6056aecf40c10` (PR #4 typography). Both typography and isolation remain mandatory for source and packaged Electron. Commit `b745481133bc7bf0f6947669cdea787baf212259` passed [Windows CI 40197324773](https://github.com/Sinfony8838/LocalCode/actions/runs/40197324773): 155 tests passed, 2 non-Windows checks skipped. The same committed runtime passed all five local packaged suites: isolation, typography, artifacts, checkpoints and model setup.
+
+Real Ark Coding Plan acceptance was repeated against the packaged 0.1.15 executable from a clean `b745481` checkout. It reopened only the synthetic test home in which the user had previously entered a key normally; no original credentials or Chromium protection metadata were extracted/copied. The first attempt made 4 requests but stopped after the model asked for approval in prose without calling the terminal tool, and was recorded as FAIL. One identical-condition repeat made 9 requests and passed actual read/edit/approved test, denial and cancellation with a ten-second no-further-tools observation. Both reports must accompany candidate evidence. This is a bounded task check, not an unconditional reliability or model-quality claim; billing and the underlying mutable alias revision remain unknown.
+
+Local Windows VM acceptance was not run: no Windows guest was available, and current host resources were insufficient. The user selected a friend's computer for clean non-administrator Windows and fresh default Ollama/reboot acceptance. Those gates remain UNRUN. This documentation update does not change runtime/support inputs; candidate manifests bind the actual tested bytes and their source provenance. No formal GitHub Release is authorized as passed until those outstanding results and final archive verification are complete.
+
 ## 0.1.15 application-data isolation candidate — RELEASE HOLD
 
 Reviewed on 2026-10-25 (Asia/Shanghai), starting from `8c9d04cd54a51d53f203cc10194230cb456ff7ef`. This update adds a mandatory workspace capability shared by file tools, the file browser, previews and run snapshots. Application data/cache/log directories are excluded by canonical path and link checks. Changes, undo, checkpoints and recovery receive the session's registered project root; journal paths cannot select a different project. Session storage aliases and multi-linked files are refused. Existing histories remain in place; unsafe legacy operations fail with an explicit error.
