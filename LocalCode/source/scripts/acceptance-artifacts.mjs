@@ -116,7 +116,7 @@ try {
   assert.equal(await summaries().count(), 0, 'Completed tools must not create completion summaries before final settled');
   finalGate.release(); await terminal(id);
   await runCard(firstRun).waitFor(); assert.equal(await summaries().count(), 1);
-  assert.match(await runCard(firstRun).innerText(), /本轮运行结束/);
+  assert.equal(await runCard(firstRun).getAttribute('aria-label'), '本轮运行记录');
   assert.match(await runCard(firstRun).innerText(), /不代表测试或任务验收通过/);
   assert.match(await runCard(firstRun).innerText(), /2\s*个文件/);
   assert.match(await runCard(firstRun).innerText(), /demo\.html/); assert.match(await runCard(firstRun).innerText(), /notes\.txt/);

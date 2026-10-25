@@ -7,7 +7,7 @@ import PetControls from './PetControls';
 import ModelSettings from './ModelSettings';
 import ModelPicker from './ModelPicker';
 import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
-import RunSummary from './RunSummary';
+import RunSummary, { RunTiming } from './RunSummary';
 import ChangeCheckpointDialog from './ChangeCheckpointDialog';
 import { reduceAgentEvent } from '../shared/session-events';
 import { providerModels } from '../shared/providers';
@@ -467,22 +467,27 @@ export default function App() {
 }
 
 function ConversationTimeline({ messages, tools, runs }: { messages: ChatMessage[]; tools: ToolRecord[]; runs: RunSummaryRecord[] }) {
+  const finalRuns = useMemo(() => new Map(runs.filter(run => run.status === 'completed' && run.finalMessageId && messages.some(message => message.id === run.finalMessageId)).map(run => [run.finalMessageId!, run])), [messages, runs]);
   const items = useMemo(() => [
     ...messages.map(message => ({ type: 'message' as const, id: message.id, createdAt: message.createdAt, message })),
     ...tools.map(tool => ({ type: 'tool' as const, id: tool.id, createdAt: tool.createdAt, tool })),
     ...runs.filter(run => run.status !== 'running' && run.endedAt).map(run => ({ type: 'summary' as const, id: run.runId, createdAt: run.endedAt!, run })),
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [messages, tools, runs]);
   return <>{items.map(item => item.type === 'message'
-    ? <Message key={`message-${item.id}`} message={item.message} />
-    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} /> : <RunSummary key={`run-${item.id}`} run={item.run} />)}</>;
+    ? <React.Fragment key={`message-${item.id}`}>{finalRuns.has(item.id) && <RunTiming run={finalRuns.get(item.id)!} />}<Message message={item.message} hideCopy={!!finalRuns.get(item.id)?.changes.length} /></React.Fragment>
+    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} /> : <React.Fragment key={`run-${item.id}`}><RunSummary run={item.run} showTiming={!item.run.finalMessageId || !finalRuns.has(item.run.finalMessageId)} />{!!item.run.changes.length && item.run.finalMessageId && finalRuns.has(item.run.finalMessageId) && <MessageCopy message={messages.find(message => message.id === item.run.finalMessageId)!} />}</React.Fragment>)}</>;
 }
 
-function Message({ message }: { message: ChatMessage }) {
+function MessageCopy({ message }: { message: ChatMessage }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(message.text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* Clipboard may be denied by the OS; leave content selectable. */ } };
+  return <button className="message-copy icon-button" aria-label="复制回答" title={copied ? '已复制' : '复制回答'} onClick={() => void copy()}>{copied ? <Check size={13} /> : <Clipboard size={13} />}</button>;
+}
+
+function Message({ message, hideCopy = false }: { message: ChatMessage; hideCopy?: boolean }) {
   if (message.role === 'user') return <div className="user-message"><div>{message.text}</div></div>;
   if (!message.text && !message.parts?.length) return null;
-  return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><Code2 size={15} /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}{!message.partial && !!message.text && <button className="message-copy icon-button" aria-label="复制回答" title={copied ? '已复制' : '复制回答'} onClick={() => void copy()}>{copied ? <Check size={13} /> : <Clipboard size={13} />}</button>}</div></article>;
+  return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><Code2 size={15} /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}{!hideCopy && !message.partial && !!message.text && <MessageCopy message={message} />}</div></article>;
 }
 
 function MarkdownText({ text }: { text: string }) {

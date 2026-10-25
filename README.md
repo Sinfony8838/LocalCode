@@ -6,6 +6,8 @@ A local-first coding desktop for Windows: Electron + React + TypeScript, a separ
 
 This repository contains the application architecture, source, tests, dependency lockfile, and bootstrap scripts.
 
+Conversation text uses the system sans-serif font, with a 14 px default size, 24 px line height, and 12 px paragraph spacing. Font size remains adjustable in Settings → Appearance. Stop status and elapsed time share one line; completed runs show elapsed time before the final reply. File cards show three files initially and expand to reveal the rest. Routine coverage notes are hidden, while actual statistics errors remain visible.
+
 > **Release hold:** the known application-data isolation issue remains unresolved. Previous validation artifacts are not recommended releases; passing build or onboarding checks does not establish release readiness.
 
 ## Quick start: choose the download that fits you
