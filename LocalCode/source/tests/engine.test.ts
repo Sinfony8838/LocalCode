@@ -41,6 +41,19 @@ function fakeEngine(killCommands: () => Promise<unknown> = async () => {}) {
 }
 
 describe('AgentEngine lifecycle and approval fencing', () => {
+  it('preserves truncated output but never marks a length-limited answer completed', async () => {
+    const f = fakeEngine(); const done = f.engine.handle(await request());
+    await vi.waitFor(() => expect(f.sessions[0]?.started).toBe(true));
+    f.sessions[0].emit({ type: 'message_start', message: { role: 'assistant' } });
+    f.sessions[0].emit({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: '只输出了前半段' }], stopReason: 'length' } });
+    f.sessions[0].settle(); await done;
+    expect(f.events.find(event => event.type === 'message_end')).toMatchObject({ text: '只输出了前半段' });
+    expect(f.events.at(-1)).toMatchObject({ type: 'settled', status: 'failed', error: expect.stringContaining('长度上限') });
+    expect(f.events.some(event => event.type === 'settled' && event.status === 'completed')).toBe(false);
+    expect(f.sessions[0].queueCleared).toBe(true);
+    expect(() => f.contexts[0].beforeTool('write_file', {})).toThrow();
+  });
+
   it('does not finish on agent_end, and releases a run only after cleanup', async () => {
     let finishCleanup!: () => void;
     const cleanup = new Promise<void>(resolve => { finishCleanup = resolve; });

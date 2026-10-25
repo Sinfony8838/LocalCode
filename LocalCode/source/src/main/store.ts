@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, Theme } from '../shared/contracts';
 import { reduceAgentEvent } from '../shared/session-events';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
+import { beginRunChanges, finishRunChanges, recoverRunChanges } from '../core/run-changes';
 
 interface Index { version: 1; projects: Project[]; sessions: SessionView[]; settings: AppSettings; keys: Record<string, string> }
 const local: ProviderConfig = { id: 'local', name: 'Ollama 本地模型', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'localcode-agent:latest', contextWindow: 8192, maxTokens: 1024, hasKey: false };
@@ -35,6 +36,12 @@ export class Store {
     for (const session of this.state.sessions) {
       if (session.status === 'running' || session.status === 'awaiting_approval') {
         session.status = 'interrupted'; session.error = '上次运行被中断。不会自动重放命令，可以发送新消息继续。';
+      }
+      for (const run of session.runs ?? []) if (run.status === 'running') {
+        run.status = 'interrupted'; run.endedAt = session.updatedAt;
+        delete run.finalMessageId;
+        run.durationMs = Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt));
+        Object.assign(run, await recoverRunChanges(this.dataDir, session.id, run.runId));
       }
       session.messages.filter(m => m.partial).forEach(m => { m.partial = false; });
       for (const message of session.messages) for (const part of message.parts ?? []) if (part.state === 'streaming') { part.state = 'interrupted'; part.endedAt = new Date().toISOString(); }
@@ -88,23 +95,48 @@ export class Store {
   async renameSession(id: string, title: string) { const s = this.session(id); s.title = title; await this.persist(); return structuredClone(s); }
   async beginRun(sessionId: string, prompt: string, providerId: string, modelId?: string) {
     const s = this.session(sessionId); this.provider(providerId);
+    // Main-process guards prevent overlap; retain a truthful boundary if callers
+    // replace an unfinished round (for example during recovery).
+    for (const previous of s.runs ?? []) if (previous.status === 'running') {
+      previous.status = 'interrupted'; previous.endedAt = new Date().toISOString();
+      delete previous.finalMessageId;
+      previous.durationMs = Math.max(0, Date.parse(previous.endedAt) - Date.parse(previous.startedAt));
+      Object.assign(previous, await recoverRunChanges(this.dataDir, sessionId, previous.runId));
+    }
     s.runId = randomUUID(); s.status = 'running'; s.providerId = providerId; s.error = undefined; s.approval = undefined;
     delete s.progress;
     s.modelId = modelId;
     s.updatedAt = new Date().toISOString();
     if (s.title === '新会话') s.title = prompt.replace(/\s+/g, ' ').slice(0, 36);
-    s.messages.push({ id: randomUUID(), role: 'user', text: prompt, createdAt: s.updatedAt });
+    s.messages.push({ id: randomUUID(), role: 'user', text: prompt, createdAt: s.updatedAt, runId: s.runId });
+    const run = { runId: s.runId, startedAt: s.updatedAt, status: 'running' as const, changes: [], changeScope: 'workspace_snapshot' as const };
+    (s.runs ??= []).push(run);
+    try { await beginRunChanges(this.dataDir, sessionId, s.runId, this.project(s.projectId).path); }
+    catch { /* Settlement explicitly reports unavailable baseline; model work may still proceed. */ }
     await this.persist(); return structuredClone(s);
   }
-  async event(event: AgentEvent) {
+  async event(event: AgentEvent): Promise<AgentEvent | undefined> {
     const index = this.state.sessions.findIndex(s => s.id === event.sessionId);
     if (index === -1 || this.state.sessions[index].runId !== event.runId) return;
+    // One authoritative receipt timestamp is persisted and broadcast to the UI.
+    // Reducers must not independently call the clock for the same event.
+    event = { ...event, recordedAt: new Date().toISOString() };
+    const current = this.state.sessions[index];
+    const run = current.runs?.find(run => run.runId === event.runId);
+    if (run && run.status !== 'running') return event;
+    if (event.type === 'settled' && run) {
+      const endedAt = event.recordedAt!;
+      const evidence = await finishRunChanges(this.dataDir, event.sessionId, event.runId, this.project(current.projectId).path);
+      const finalMessageId = event.status === 'completed' ? run.finalMessageId : undefined;
+      event = { ...event, summary: { ...run, ...evidence, status: event.status, endedAt, durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(run.startedAt)), finalMessageId } };
+    }
     this.state.sessions[index] = reduceAgentEvent(this.state.sessions[index], event);
     if (event.type === 'part_delta' || event.type === 'text_delta' || event.type === 'progress') {
       this.deltaTimer ??= setTimeout(() => { this.deltaTimer = undefined; void this.persist().catch(error => { this.backgroundError = error; }); }, 500);
-      return;
+      return event;
     }
     await this.persist();
+    return event;
   }
   async saveProvider(provider: ProviderConfig, encryptedKey?: string | null) {
     if (provider.kind === 'ollama' && provider.id !== 'local') throw new Error('Ollama 使用内置本地配置；其他服务请添加兼容 API。');

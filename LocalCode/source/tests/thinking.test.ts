@@ -71,7 +71,13 @@ it('persists live parts within 500ms, uses the same reducer, and recovers interr
     { type: 'part_delta', runId, sessionId: s.id, messageId: 'm', index: 0, delta: 'live partial' },
   ];
   let frontend = begun;
-  for (const event of events) { frontend = reduceAgentEvent(frontend, event); await store.event(event); }
+  for (const event of events) {
+    const canonical = await store.event(event);
+    expect(canonical?.recordedAt).toEqual(expect.any(String));
+    frontend = reduceAgentEvent(frontend, canonical!);
+    expect(frontend.updatedAt).toBe(canonical!.recordedAt);
+    expect(store.session(s.id).updatedAt).toBe(canonical!.recordedAt);
+  }
   expect(store.session(s.id).messages).toEqual(frontend.messages);
   await new Promise(resolve => setTimeout(resolve, 600));
   expect(await fs.readFile(store.indexFile, 'utf8')).toContain('live partial');

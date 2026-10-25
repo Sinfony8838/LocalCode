@@ -66,7 +66,10 @@ const SYSTEM_PROMPT = `你是 LocalCode，本机中文编程助手。只使用�
 先浏览和分页读取相关文件，再做最小必要修改。不要臆测文件内容。文件路径相对当前项目。
 命令由用户逐次审批；拒绝后不要绕过审批。命令以当前用户权限执行，没有系统沙箱。
 工具参数必须严格匹配声明。参数错误只有一次纠正机会。每轮最多12次工具调用；接近上限时收尾。
-工具输出若标注截断，可缩小范围再次读取；界面保留完整日志。完成后用中文简述修改和实际检查结果。`;
+工具输出若标注截断，可缩小范围再次读取；界面保留完整日志。
+阶段性回复只说明当前发现和下一步，不要在每次工具调用或模型消息结束时宣称整轮完成。
+只有本轮用户任务实际结束、不再调用工具时，给出一次简洁的中文最终总结：先说完成了什么，再说明实际验证结果、生成或修改的文件；若仍有失败、未验证或未完成事项，明确写出。不要虚构检查通过、文件数量或完成状态。
+文件链接使用项目相对路径，便于在应用内查看。修改数量和耗时由应用在整轮结束后统计，无需反复列举。`;
 
 /** Never discovers resources from the project, home directory, or pi's global configuration. */
 export function isolatedResourceLoader(): ResourceLoader {
@@ -371,6 +374,7 @@ export class AgentEngine {
           this.send(run, { type: 'message_end', messageId: id, text: resultText(event.message) });
           this.log(run, { type: 'model_usage', messageId: id, usage: event.message.usage, stopReason: event.message.stopReason });
           if (event.message.stopReason === 'error') run.failure ??= event.message.errorMessage || '模型请求失败。';
+          if (event.message.stopReason === 'length') this.fail(run, '模型输出达到长度上限，回复已截断，本轮未完整完成。已收到的内容和文件修改已保留，可以发送新消息继续。');
           run.messageId = undefined;
         }
         break;

@@ -31,7 +31,7 @@ button { cursor: pointer; color: inherit; border: 0; background: transparent; }
 button, a, input, select, textarea { -webkit-app-region: no-drag; }
 button:disabled { cursor: not-allowed; opacity: .46; }
 button, input, select, textarea { outline: none; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 button { transition: background .15s, color .15s, border-color .15s; }
 svg { flex-shrink: 0; }
 ::selection { background: var(--selected); }
@@ -45,6 +45,43 @@ svg { flex-shrink: 0; }
 .sidebar-hidden .workspace { grid-column: 3; border-radius: 13px 0 0 13px; }
 .inspector-hidden .workspace { border-radius: 0 13px 13px 0; }
 .sidebar-hidden.inspector-hidden .workspace { border-radius: 13px; }
+.app-shell.artifact-open { grid-template-columns: 48px var(--sidebar-width) minmax(280px, 1fr) minmax(320px, 1.1fr); }
+.artifact-link { display: inline-flex; align-items: center; gap: 5px; padding: 0; color: var(--accent); text-decoration: none; cursor: pointer; text-align: left; overflow-wrap: anywhere; max-width: 100%; vertical-align: baseline; }
+.artifact-link:hover { text-decoration: underline; }
+.artifact-link code { text-align: left; }
+.artifact-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--border); border-radius: 0 13px 13px 0; overflow: hidden; }
+.artifact-panel.expanded { position: fixed; inset: 6px 6px 6px 48px; z-index: 35; border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow); }
+.artifact-header { display: flex; gap: 9px; align-items: center; padding: 9px 12px; min-height: 51px; border-bottom: 1px solid var(--border); }
+.artifact-header > strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8125rem; font-weight: 500; }
+.artifact-toolbar { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.artifact-toolbar > div { display: flex; gap: 3px; margin-right: auto; padding: 3px; border-radius: 8px; background: var(--code); }
+.artifact-toolbar > div button { padding: 5px 14px; border-radius: 5px; color: var(--muted); font-size: .75rem; }
+.artifact-toolbar > div button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px #0001; }
+.artifact-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: white; color-scheme: light; }
+.artifact-source { margin: 0; flex: 1; min-height: 0; overflow: auto; padding: 16px; font-family: var(--mono); font-size: .75rem; line-height: 1.7; tab-size: 2; background: var(--code); }
+.artifact-footer { font-size: .625rem; padding: 8px 12px; border-top: 1px solid var(--border); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-menu { position: fixed; z-index: 150; width: 286px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 11px; box-shadow: var(--shadow); }
+.artifact-menu-name { padding: 7px 10px; font-size: .6875rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-menu > button { display: flex; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 6px; align-items: center; text-align: left; font-size: .75rem; }
+.artifact-menu > button:hover:not(:disabled), .artifact-menu > button:focus-visible { background: var(--hover); outline-offset: -2px; }
+.artifact-menu-divider { margin: 5px 4px; border-top: 1px solid var(--border); }
+.artifact-menu > p { padding: 8px; color: var(--muted); font-size: .75rem; overflow-wrap: anywhere; }
+.tool-file-action { padding: 0 12px 9px 35px; font-size: .6875rem; }
+.run-summary { margin: 20px 0 30px 34px; border-top: 1px solid var(--border); padding-top: 13px; color: var(--muted); font-size: .75rem; }
+.run-summary-heading { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 4px 0; line-height: 1.6; }
+.run-summary-heading > span { flex: 1; }
+.run-summary.completed .run-summary-heading > svg:first-child { color: var(--added); }
+.run-summary.failed .run-summary-heading > svg:first-child { color: var(--danger); }
+.run-summary-meta { display: flex; align-items: center; gap: 9px; padding: 7px 0 11px 25px; color: var(--faint); font-size: .6875rem; }
+.run-summary-meta > span:first-child { margin-right: auto; }
+.run-file-list { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface); }
+.run-file-row { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: .6875rem; }
+.run-file-row:last-child { border-bottom: 0; }
+.run-file-row .artifact-link, .run-file-deleted { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.run-file-deleted { text-decoration: line-through; }
+.run-file-kind { color: var(--faint); }
+.run-file-row > .added, .run-file-row > .removed { font-family: var(--mono); }
+.run-summary-note { margin: 9px 0 0; line-height: 1.6; font-size: .625rem; color: var(--faint); }
 .activity-rail { display: flex; flex-direction: column; align-items: center; padding: 9px 5px 7px; gap: 10px; }
 .rail-button { width: 36px; height: 36px; border-radius: 10px; color: var(--muted); display: grid; place-items: center; }
 .rail-button:hover, .rail-button.active { background: var(--hover); color: var(--text); }
