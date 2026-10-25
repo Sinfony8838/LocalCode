@@ -30,7 +30,7 @@ describe('early startup storage checks', () => {
   it('fails before opening the log if creating or writing an exclusive probe is blocked', () => {
     for (const stage of ['mkdir', 'open', 'write']) {
       const home = create();
-      const io = { mkdirSync: fs.mkdirSync, openSync: fs.openSync, writeSync: fs.writeSync, closeSync: vi.fn(fs.closeSync), unlinkSync: vi.fn(fs.unlinkSync) };
+      const io = { mkdirSync: fs.mkdirSync, openSync: fs.openSync, fstatSync: fs.fstatSync, writeSync: fs.writeSync, closeSync: vi.fn(fs.closeSync), unlinkSync: vi.fn(fs.unlinkSync) };
       if (stage === 'mkdir') io.mkdirSync = vi.fn(() => { throw new Error('EACCES private-directory'); });
       if (stage === 'open') io.openSync = vi.fn(() => { throw new Error('EACCES private-file'); });
       if (stage === 'write') io.writeSync = vi.fn(() => { throw new Error('ENOSPC private-volume'); });
@@ -55,6 +55,24 @@ describe('early startup storage checks', () => {
     const home = create(); fs.mkdirSync(path.join(home, 'logs/desktop.log'), { recursive: true });
     expect(() => prepareStartupStorage(home)).toThrow();
     expect(probes(home)).toEqual([]);
+  });
+  it.each(['directory', 'stat-error'])('closes an opened log handle when validation reports %s on any platform', mode => {
+    const home = create(); const fakeLogFd = -777;
+    fs.mkdirSync(path.join(home, 'logs'));
+    fs.writeFileSync(path.join(home, 'logs/desktop.log'), 'keep prior log');
+    const io = { ...fs,
+      openSync: vi.fn((file: fs.PathLike, flags: fs.OpenMode, permissions?: fs.Mode | null) => flags === 'a' ? fakeLogFd : fs.openSync(file, flags, permissions)),
+      fstatSync: vi.fn().mockImplementation(() => {
+        if (mode === 'stat-error') throw new Error('handle inspection failed');
+        return { isFile: () => false };
+      }),
+      closeSync: vi.fn((descriptor: number) => { if (descriptor !== fakeLogFd) fs.closeSync(descriptor); }),
+    };
+    expect(() => prepareStartupStorage(home, io)).toThrow(mode === 'directory' ? 'not a regular file' : 'handle inspection failed');
+    expect(io.fstatSync).toHaveBeenCalledWith(fakeLogFd);
+    expect(io.closeSync.mock.calls.filter(([descriptor]) => descriptor === fakeLogFd)).toHaveLength(1);
+    expect(probes(home)).toEqual([]);
+    expect(fs.readFileSync(path.join(home, 'logs/desktop.log'), 'utf8')).toBe('keep prior log');
   });
   it('keeps user-facing failures fixed and provides safe writable-directory remedies', () => {
     expect(STARTUP_STORAGE_ERROR).toContain('可写的本地目录');

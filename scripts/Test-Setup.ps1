@@ -263,3 +263,6 @@ try {
     # Delete only this test's own unique synthetic fixture directory.
     Remove-Item -LiteralPath $temp -Recurse -Force
 }
+# An expected failing native child leaves LASTEXITCODE = 1. Clear the process
+# result only after all assertions and finally cleanup complete successfully.
+exit 0
