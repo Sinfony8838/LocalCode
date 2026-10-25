@@ -9,7 +9,7 @@ if (-not (Test-Path -LiteralPath $exe)) { throw '缺少本套 Ollama 运行时�
 $server = $null
 if (Test-Path -LiteralPath $pidFile) {
     $serverId = 0
-    if ([int]::TryParse(([string](Get-Content -LiteralPath $pidFile -Raw)).Trim(), [ref]$serverId) -and $serverId -gt 0) {
+    if ([int]::TryParse([System.IO.File]::ReadAllText($pidFile), [ref]$serverId) -and $serverId -gt 0) {
         $server = Get-Process -Id $serverId -ErrorAction SilentlyContinue
         if ($server -and $server.Path -ne $exe) { $server = $null }
     }

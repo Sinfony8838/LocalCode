@@ -28,7 +28,13 @@ function Assert-LocalCodePackagedApp([string]$Root) {
     $app = Join-Path $Root 'LocalCode\app'
     $marker = Join-Path $app 'current.txt'
     $release = 'LocalCode-win32-x64'
-    if (Test-Path -LiteralPath $marker) { $release = ([string](Get-Content -LiteralPath $marker -Raw)).Trim() }
+    if (Test-Path -LiteralPath $marker) {
+        # Windows PowerShell 5.1 can return no pipeline value for an empty file.
+        # ReadAllText returns an empty string deterministically; guard before Trim.
+        [string]$releaseContents = [System.IO.File]::ReadAllText($marker)
+        if ([string]::IsNullOrWhiteSpace($releaseContents)) { $release = '' }
+        else { $release = $releaseContents.Trim() }
+    }
     if (-not $release -or [System.IO.Path]::IsPathRooted($release) -or $release -match '[\r\n":*?<>|]' -or @($release -split '[\\/]' | Where-Object { $_ -eq '..' }).Count) {
         throw '应用版本路径无效。请重新完整解压便携 ZIP，不会修改已有文件。 / Invalid app release path. Extract a fresh complete portable ZIP; existing files are preserved.'
     }
@@ -146,7 +152,7 @@ function Assert-LocalCodeManagedServer([string]$OllamaRoot, [int]$ServerId = 0, 
     $exe = Join-Path $OllamaRoot 'runtime\ollama.exe'
     if ($ServerId -le 0) {
         $pidFile = Join-Path $OllamaRoot 'logs\server.pid'
-        if (-not (Test-Path -LiteralPath $pidFile) -or -not [int]::TryParse(([string](Get-Content -LiteralPath $pidFile -Raw)).Trim(), [ref]$ServerId) -or $ServerId -le 0) {
+        if (-not (Test-Path -LiteralPath $pidFile) -or -not [int]::TryParse([System.IO.File]::ReadAllText($pidFile), [ref]$ServerId) -or $ServerId -le 0) {
             throw '本套 Ollama 的进程记录无效。请使用本套 Ollama\Start.cmd 重新启动；不会继续请求模型。 / Managed Ollama PID record is invalid. Start this installation using Ollama\Start.cmd; no further model request will be made.'
         }
     }

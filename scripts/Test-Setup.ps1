@@ -11,8 +11,9 @@ function Assert([bool]$Condition, [string]$Message) {
 }
 function Assert-Throws([scriptblock]$Action, [string]$Pattern) {
     $message = $null
-    try { & $Action | Out-Null } catch { $message = $_.Exception.Message }
-    Assert ($null -ne $message -and $message -match $Pattern) "Expected failure matching '$Pattern'; got '$message'"
+    $failureStack = $null
+    try { & $Action | Out-Null } catch { $message = $_.Exception.Message; $failureStack = $_.ScriptStackTrace }
+    Assert ($null -ne $message -and $message -match $Pattern) "Expected failure matching '$Pattern'; got '$message'. Failure stack: $failureStack"
 }
 function File-Snapshot([string]$Folder) {
     @((Get-ChildItem -LiteralPath $Folder -Recurse -Force | Sort-Object FullName | ForEach-Object {
@@ -75,7 +76,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $app 'current.txt'), "releases\test\LocalCode-win32-x64`r`n")
     [IO.File]::WriteAllText((Join-Path $app 'releases\test\LocalCode-win32-x64\LocalCode.exe'), 'synthetic-not-executable')
     Assert-LocalCodePackagedApp $fixture
-    foreach ($invalid in @('', '..\outside', 'C:\outside', "releases\test`nother", '\\server\share')) {
+    foreach ($invalid in @('', " `t`r`n", '..\outside', 'C:\outside', "releases\test`nother", '\\server\share')) {
         [IO.File]::WriteAllText((Join-Path $app 'current.txt'), $invalid)
         Assert-Throws { Assert-LocalCodePackagedApp $fixture } 'Invalid app release path'
     }
@@ -91,6 +92,8 @@ try {
     function Get-LocalCodePortListeners { $script:fakeListeners }
     try {
         Assert (Assert-LocalCodeManagedServer $managedRoot) 'Managed executable and matching listener PID are required'
+        [IO.File]::WriteAllText($managedPid, " 123`r`n")
+        Assert (Assert-LocalCodeManagedServer $managedRoot) 'PID parsing accepts whitespace without calling Trim on file output'
         $script:fakeListeners = @([pscustomobject]@{ OwningProcess = 456 })
         Assert-Throws { Assert-LocalCodeManagedServer $managedRoot } 'unrelated listener'
         $script:fakeListeners = @([pscustomobject]@{ OwningProcess = 123 }, [pscustomobject]@{ OwningProcess = 456 })
@@ -103,7 +106,7 @@ try {
         Assert-Throws { Assert-LocalCodeManagedServer $managedRoot } 'path does not match'
         $script:fakeProcess = $null
         Assert-Throws { Assert-LocalCodeManagedServer $managedRoot } 'not running'
-        foreach ($invalid in @('', 'bad-pid', '-1')) {
+        foreach ($invalid in @('', " `t`r`n", 'bad-pid', '-1')) {
             [IO.File]::WriteAllText($managedPid, $invalid)
             Assert-Throws { Assert-LocalCodeManagedServer $managedRoot } 'PID record is invalid'
         }

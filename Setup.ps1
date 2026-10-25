@@ -57,7 +57,7 @@ try {
             $owned = $null
             if (Test-Path -LiteralPath $pidFile) {
                 $serverId = 0
-                if ([int]::TryParse(([string](Get-Content -LiteralPath $pidFile -Raw)).Trim(), [ref]$serverId) -and $serverId -gt 0) {
+                if ([int]::TryParse([System.IO.File]::ReadAllText($pidFile), [ref]$serverId) -and $serverId -gt 0) {
                     $owned = Get-Process -Id $serverId -ErrorAction SilentlyContinue
                 }
             }
