@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { syntheticPetAtlas } from './helpers/pet-fixture.mjs';
 
 const root = path.resolve(`../evidence/pet-customization-${Date.now()}`);
+const packagedExecutable = process.argv[2] ? path.resolve(process.argv[2]) : undefined;
 const project = path.join(root, 'project');
 await fs.mkdir(project, { recursive: true });
 const fixtureAtlas = syntheticPetAtlas();
@@ -31,7 +32,7 @@ server.listen(0, '127.0.0.1'); await once(server, 'listening');
 const env = { ...process.env, LOCALCODE_HOME: root, LOCALCODE_SKIP_OLLAMA_START: '1', TEMP: path.resolve('../cache'), TMP: path.resolve('../cache') };
 delete env.ELECTRON_RUN_AS_NODE;
 async function launch() {
-  const packaged = process.argv[2];
+  const packaged = packagedExecutable;
   await fs.mkdir(env.TEMP, { recursive: true });
   app = await electron.launch({ executablePath: packaged || path.resolve('node_modules/electron/dist/electron.exe'), args: packaged ? [] : [process.cwd()], env, timeout: 60000 });
   page = await until(async () => app.windows().find(window => /\/index\.html/.test(window.url())), value => !!value, 'main window');
@@ -131,8 +132,8 @@ try {
   assert.equal(state.preferences.selected, 'paimon'); await fs.access(path.join(root, 'data/pets', `${customId}.png`));
   await assert.rejects(page.evaluate(() => window.localpets.remove('paimon')), /内置/);
   checks.push('custom library and preference survive restart; removing selected custom pet falls back and preserves its atlas');
-  const executable = process.argv[2] || path.resolve('node_modules/electron/dist/electron.exe');
-  const skillScript = process.argv[2] ? path.join(path.dirname(executable), 'resources/app/dist/skills/create-desktop-pet/scripts/pet-assets.mjs') : path.resolve('dist/skills/create-desktop-pet/scripts/pet-assets.mjs');
+  const executable = packagedExecutable || path.resolve('node_modules/electron/dist/electron.exe');
+  const skillScript = packagedExecutable ? path.join(path.dirname(executable), 'resources/app/dist/skills/create-desktop-pet/scripts/pet-assets.mjs') : path.resolve('dist/skills/create-desktop-pet/scripts/pet-assets.mjs');
   for (const args of [['status'], ['pack', '--input', 'pet.png', '--out-dir', 'portable-pet', '--name', '便携测试'], ['validate', '--manifest', 'portable-pet/pet.json']]) {
     const run = spawnSync(executable, [skillScript, ...args], { cwd: project, env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, windowsHide: true, encoding: 'utf8', timeout: 30000 });
     assert.equal(run.status, 0, run.stderr || String(run.error)); assert(JSON.parse(run.stdout));
