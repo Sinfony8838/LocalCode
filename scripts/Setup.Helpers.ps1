@@ -33,9 +33,10 @@ function Assert-LocalCodePackagedApp([string]$Root) {
         # ReadAllText returns an empty string deterministically; guard before Trim.
         [string]$releaseContents = [System.IO.File]::ReadAllText($marker)
         if ([string]::IsNullOrWhiteSpace($releaseContents)) { $release = '' }
-        else { $release = $releaseContents.Trim() }
+        else { $release = $releaseContents.TrimEnd([char[]]"`r`n") }
     }
-    if (-not $release -or [System.IO.Path]::IsPathRooted($release) -or $release -match '[\r\n":*?<>|]' -or @($release -split '[\\/]' | Where-Object { $_ -eq '..' }).Count) {
+    # .NET Framework path APIs throw for invalid characters; reject them first.
+    if (-not $release -or $release -match '[\x00-\x1F\x7F":*?<>|]' -or [System.IO.Path]::IsPathRooted($release) -or @($release -split '[\\/]' | Where-Object { $_ -eq '..' }).Count) {
         throw '应用版本路径无效。请重新完整解压便携 ZIP，不会修改已有文件。 / Invalid app release path. Extract a fresh complete portable ZIP; existing files are preserved.'
     }
     if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $app $release) 'LocalCode.exe') -PathType Leaf)) {

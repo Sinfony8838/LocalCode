@@ -76,7 +76,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $app 'current.txt'), "releases\test\LocalCode-win32-x64`r`n")
     [IO.File]::WriteAllText((Join-Path $app 'releases\test\LocalCode-win32-x64\LocalCode.exe'), 'synthetic-not-executable')
     Assert-LocalCodePackagedApp $fixture
-    foreach ($invalid in @('', " `t`r`n", '..\outside', 'C:\outside', "releases\test`nother", '\\server\share')) {
+    $invalidReleases = @('', " `t`r`n", '..\outside', '../outside', 'C:\outside', 'C:relative', '\rooted', '/rooted', "releases\test`nother", '\\server\share')
+    # Exercise the full C0 range on .NET Framework, not only newline/NUL.
+    foreach ($code in (0..31) + @(127)) { $invalidReleases += 'releases\bad' + [char]$code + '\LocalCode-win32-x64' }
+    foreach ($character in @('"', ':', '*', '?', '<', '>', '|')) { $invalidReleases += 'releases\bad' + $character + '\LocalCode-win32-x64' }
+    # Only the marker's CR/LF record ending may be trimmed, not other controls.
+    $invalidReleases += "`tLocalCode-win32-x64", "LocalCode-win32-x64`t"
+    foreach ($invalid in $invalidReleases) {
         [IO.File]::WriteAllText((Join-Path $app 'current.txt'), $invalid)
         Assert-Throws { Assert-LocalCodePackagedApp $fixture } 'Invalid app release path'
     }
