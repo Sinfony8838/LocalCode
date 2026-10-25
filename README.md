@@ -4,7 +4,7 @@
 
 A local-first coding desktop for Windows: Electron + React + TypeScript, a separate agent worker for each conversation, and Ollama inference on your own computer. Read and edit project files, review changes, approve terminal commands, and resume saved conversations in a Chinese-language desktop UI. Optional external providers support OpenAI Chat Completions, Responses, and Anthropic Messages.
 
-This repository contains the application architecture, source, tests, dependency lockfile, and bootstrap scripts. Your API keys, conversations, project snapshots, logs, browser profile, installed applications, and model weights are **not included**.
+This repository contains the application architecture, source, tests, dependency lockfile, and bootstrap scripts.
 
 ## Quick start
 
