@@ -70,7 +70,13 @@ try {
   checks.push('preview, none, show/hide and pause controls persist through IPC');
   await page.getByRole('button', { name: '自定义', exact: true }).click();
   await page.getByLabel('桌宠大小', { exact: true }).selectOption('128');
-  await page.getByLabel('桌宠目光跟随', { exact: true }).uncheck();
+  await until(() => page.evaluate(() => window.localpets.state()), value => value.preferences.size === 128, 'size saved');
+  await page.waitForFunction(() => document.querySelector('.lc-pet-dialog')?.getAttribute('aria-busy') === 'false');
+  // React restores controlled inputs until the async IPC save returns. Verify
+  // the persisted value and the settled UI rather than the immediate click.
+  await page.getByLabel('桌宠目光跟随', { exact: true }).click();
+  await until(() => page.evaluate(() => window.localpets.state()), value => !value.preferences.followCursor, 'cursor preference saved');
+  await page.waitForFunction(() => document.querySelector('.lc-pet-dialog')?.getAttribute('aria-busy') === 'false' && !document.querySelector('[aria-label="桌宠目光跟随"]').checked);
   await page.getByRole('button', { name: '收起桌宠偏好' }).click();
   await page.getByRole('button', { name: '创建虚拟宠物', exact: true }).click();
   await page.getByLabel('宠物名称', { exact: true }).fill('导入测试');
