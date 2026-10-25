@@ -3,6 +3,7 @@ import './pet-bridge';
 import type { AppEvent, LocalCodeApi } from '../shared/contracts';
 const invoke = (method: string, argument?: unknown) => ipcRenderer.invoke('localcode:invoke', method, argument);
 const api: LocalCodeApi = {
+  setLocale: locale => invoke('setLocale', locale),
   bootstrap: () => invoke('bootstrap'), pickProject: () => invoke('pickProject'),
   createSession: id => invoke('createSession', id), openSession: id => invoke('openSession', id), renameSession: input => invoke('renameSession', input),
   send: input => invoke('send', input), stop: id => invoke('stop', id), approve: input => invoke('approve', input),

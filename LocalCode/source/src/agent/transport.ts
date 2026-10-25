@@ -1,7 +1,9 @@
 import type { RunProgress } from '../shared/contracts';
+import { DEFAULT_LOCALE, translate, type AppLocale } from '../shared/i18n';
 
 export interface RequestLease { release(cooldownUntil?: number): void }
 export interface TransportOptions {
+  locale?: AppLocale;
   signal: AbortSignal;
   acquire(signal: AbortSignal): Promise<RequestLease>;
   progress(value: RunProgress): void;
@@ -13,7 +15,7 @@ export interface TransportOptions {
   random?: () => number;
 }
 const now = () => new Date().toISOString();
-const abortError = () => new DOMException('请求已取消。', 'AbortError');
+const abortError = (locale = DEFAULT_LOCALE) => new DOMException(translate(locale, '请求已取消。'), 'AbortError');
 export function retryDelay(headers: Headers, attempt: number, backoffs = [5000, 15000], random = Math.random): number {
   const ms = headers.get('retry-after-ms');
   if (ms !== null && ms.trim() && Number.isFinite(Number(ms)) && Number(ms) >= 0) return Number(ms);
@@ -25,23 +27,24 @@ export function retryDelay(headers: Headers, attempt: number, backoffs = [5000, 
   }
   return (backoffs[attempt] ?? 15000) + Math.floor(random() * 1000);
 }
-export function sleep(ms: number, signal: AbortSignal): Promise<void> {
+export function sleep(ms: number, signal: AbortSignal, locale = DEFAULT_LOCALE): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(abortError()); return; }
-    const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(abortError()); };
+    if (signal.aborted) { reject(abortError(locale)); return; }
+    const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(abortError(locale)); };
     const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
     signal.addEventListener('abort', abort, { once: true });
   });
 }
-function errorDescription(status: number, raw: string, headers: Headers): string {
+function errorDescription(status: number, raw: string, headers: Headers, locale = DEFAULT_LOCALE): string {
   let code = ''; let requestId = headers.get('x-request-id') ?? ''; let detail = raw;
   try { const data = JSON.parse(raw); code = data.error?.code ?? data.error?.type ?? ''; requestId ||= data.request_id ?? data.error?.request_id ?? ''; detail = data.error?.message ?? raw; } catch { /* retain bounded raw data */ }
-  const hint = status === 429 ? '供应商请求限流，自动恢复未成功，请稍后继续。' : status === 401 || status === 403 ? '供应商鉴权或权限检查失败。' : `供应商请求失败（HTTP ${status}）。`;
-  return `${hint} 已完成的文件修改仍保留。\nHTTP ${status}${code ? ` · ${code}` : ''}${requestId ? ` · request ID: ${requestId}` : ''}\n${String(detail).slice(0, 4096)}`;
+  const hint = status === 429 ? translate(locale, '供应商请求限流，自动恢复未成功，请稍后继续。') : status === 401 || status === 403 ? translate(locale, '供应商鉴权或权限检查失败。') : translate(locale, '供应商请求失败（HTTP {status}）。', { status });
+  return `${hint} ${translate(locale, '已完成的文件修改仍保留。')}\nHTTP ${status}${code ? ` · ${code}` : ''}${requestId ? ` · request ID: ${requestId}` : ''}\n${String(detail).slice(0, 4096)}`;
 }
 
 /** Wraps the SDK's actual HTTP boundary, never retries an accepted/partial stream. */
 export function managedTransport(options: TransportOptions) {
+  const locale = options.locale ?? DEFAULT_LOCALE;
   let touch: (() => void) | undefined;
   let close: (() => void) | undefined;
   const emit = (phase: RunProgress['phase'], extra = {}) => options.progress({ phase, since: now(), ...extra });
@@ -62,13 +65,13 @@ export function managedTransport(options: TransportOptions) {
       parentSignal.throwIfAborted();
       emit('queued');
       const lease = await options.acquire(parentSignal);
-      if (parentSignal.aborted) { lease.release(); throw abortError(); }
+      if (parentSignal.aborted) { lease.release(); throw abortError(locale); }
       const controller = new AbortController();
       const signal = AbortSignal.any([parentSignal, controller.signal]);
       let timer: ReturnType<typeof setTimeout> | undefined; let released = false; let idle = false;
       const release = (cooldown?: number) => { if (released) return; released = true; clearTimeout(timer); if (touch === arm) touch = undefined; if (close === dispose) close = undefined; lease.release(cooldown); };
       const dispose = () => { controller.abort(); release(); };
-      const arm = () => { clearTimeout(timer); timer = setTimeout(() => { idle = true; controller.abort(new Error('模型请求超过 120 秒没有有效进展，已停止。已完成的文件修改仍保留。')); }, options.idleMs ?? 120000); };
+      const arm = () => { clearTimeout(timer); timer = setTimeout(() => { idle = true; controller.abort(new Error(translate(locale, '模型请求超过 120 秒没有有效进展，已停止。已完成的文件修改仍保留。'))); }, options.idleMs ?? 120000); };
       touch = arm; close = dispose; arm(); emit('waiting');
       options.telemetry('request_start', { attempt: attempt + 1 });
       try {
@@ -88,19 +91,19 @@ export function managedTransport(options: TransportOptions) {
             if (attempt < 2 && wait <= 120000 && response.headers.get('x-should-retry') !== 'false') {
               options.telemetry('request_retry', { attempt: attempt + 1, delayMs: wait, status: 429 });
               emit('retry', { retryAt: until, attempt: attempt + 1 });
-              await sleep(wait, parentSignal); continue;
+              await sleep(wait, parentSignal, locale); continue;
             }
-            const extra = wait > 120000 ? `服务端要求等待 ${Math.ceil(wait / 1000)} 秒，超过自动等待上限。\n` : '';
-            throw new Error(extra + errorDescription(429, raw, response.headers));
+            const extra = wait > 120000 ? translate(locale, '服务端要求等待 {seconds} 秒，超过自动等待上限。', { seconds: Math.ceil(wait / 1000) }) + '\n' : '';
+            throw new Error(extra + errorDescription(429, raw, response.headers, locale));
           }
-          throw new Error(errorDescription(response.status, raw, response.headers));
+          throw new Error(errorDescription(response.status, raw, response.headers, locale));
         }
         const reader = response.body?.getReader();
         if (!reader) { release(); return response; }
         let finished = false;
         const clean = () => { if (finished) return; finished = true; signal.removeEventListener('abort', abort); release(); };
         let streamController: ReadableStreamDefaultController<Uint8Array>;
-        const abort = () => { if (finished) return; const reason = idle ? controller.signal.reason : abortError(); if (idle) options.failure?.(String(reason?.message ?? reason)); clean(); streamController.error(reason); void reader.cancel().catch(() => {}); };
+        const abort = () => { if (finished) return; const reason = idle ? controller.signal.reason : abortError(locale); if (idle) options.failure?.(String(reason?.message ?? reason)); clean(); streamController.error(reason); void reader.cancel().catch(() => {}); };
         const body = new ReadableStream<Uint8Array>({
           start(c) { streamController = c; signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort(); },
           async pull(c) {
