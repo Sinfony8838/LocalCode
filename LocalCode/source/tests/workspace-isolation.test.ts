@@ -103,6 +103,15 @@ describe('application directories are excluded from all workspace capabilities',
     await expect(resolveWorkspacePath(workspaceContext(linked, f.dataDir), '', { directory: true })).rejects.toBeInstanceOf(WorkspaceAccessError);
   });
 
+  it('registers a selected project alias as its canonical root before granting file access', async () => {
+    const f = await fixture(); const store = new Store(f.dataDir); await store.init();
+    const alias = path.join(f.root, 'project-alias'); await fs.symlink(f.projectPath, alias, 'junction');
+    const selected = await store.addProject(alias);
+    expect(pathKey(selected.path)).toBe(pathKey(await fs.realpath(f.projectPath)));
+    expect(await store.addProject(f.projectPath)).toEqual(selected);
+    expect(await readWorkspaceText(store.workspace(selected.id), 'code.ps1')).toBe('original');
+  });
+
   it.skipIf(process.platform !== 'win32')('applies Windows case rules and extended path spellings consistently', async () => {
     const f = await fixture();
     await expect(readWorkspaceText(f, 'APP-HOME/DATA/private.txt')).rejects.toBeInstanceOf(WorkspaceAccessError);

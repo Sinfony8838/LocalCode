@@ -7,7 +7,7 @@ Reviewed on 2026-10-25 (Asia/Shanghai), starting from `8c9d04cd54a51d53f203cc101
 | Check | Result |
 | --- | --- |
 | TypeScript and production build | PASS locally |
-| Unit/integration regression | PASS; 154 passed, 2 non-Windows-only checks skipped on Windows, 19 files; includes 17 new synthetic isolation cases |
+| Unit/integration regression | PASS locally; initial full run: 154 passed, 2 non-Windows-only checks skipped, 19 files. After canonicalizing synthetic worker roots, 40 focused engine/thinking/isolation checks passed, including 18 isolation cases |
 | Windows PowerShell 5.1 and PowerShell 7 setup checks | PASS; 132 checks in each shell, no actual downloads or service starts |
 | Portable allowlist regression | PASS; 3 passed, 1 Linux-only symlink negative control skipped on Windows |
 | Real Electron source isolation acceptance | PASS; project selection, file/browser/preview denial, journal ownership, normal history/checkpoint/undo, explicit data-folder opening |
@@ -20,6 +20,8 @@ Reviewed on 2026-10-25 (Asia/Shanghai), starting from `8c9d04cd54a51d53f203cc101
 | Final package, hosted CI and public GitHub Release | PENDING; no release readiness claim |
 
 All isolation fixtures use temporary directories and fabricated records. The first restricted local run failed because junctions, links, localhost access and process verification were restricted; the full-permission Windows run passed. An intermediate run encountered a transient `EPERM` on atomic workspace rename; its result was retained and the subsequent complete run passed without replacing atomic writes with truncation. These failures are not counted as successful checks.
+
+The first PR #3 hosted run rejected synthetic worker requests whose raw temporary root differed from `realpath` on the runner. The real project picker already registers canonical roots. The worker fixtures now canonicalize their roots at creation, and an additional regression verifies selecting a project through an alias. The production root-change guard remains unchanged. Consult [PR #3 checks](https://github.com/Sinfony8838/LocalCode/pull/3/checks) for the latest hosted result; the earlier failed run is not acceptance evidence.
 
 The real-cloud harness reads provider metadata but requires credentials to be saved directly in its isolated desktop. It copies neither original credentials nor Chromium encryption metadata. It records actual task outcomes, request attempts, returned model identifiers and usage when available; a subscription price or underlying alias version is unknown unless the provider exposes it. A settings-only response is not proof of tool execution.
 

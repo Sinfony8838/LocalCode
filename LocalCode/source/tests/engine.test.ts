@@ -1,6 +1,6 @@
 import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createServer, type Server } from 'node:http';
@@ -15,7 +15,7 @@ async function request(runId = 'run1', sessionId = 'session1'): Promise<RunReque
   temporary.push(root);
   const projectPath = path.join(root, 'project'); const dataDir = path.join(root, 'data');
   await Promise.all([mkdir(projectPath), mkdir(dataDir)]);
-  return { type: 'run', runId, sessionId, ...workspaceContext(projectPath, dataDir), prompt: '测试',
+  return { type: 'run', runId, sessionId, ...workspaceContext(await realpath(projectPath), dataDir), prompt: '测试',
     provider: { id: 'mock', name: 'Mock', kind: 'openai', baseUrl: 'http://127.0.0.1:1/v1',
       model: 'mock-model', contextWindow: 8192, maxTokens: 1024, apiKey: 'mock-never-persist-this-test-key', hasKey: true } };
 }
