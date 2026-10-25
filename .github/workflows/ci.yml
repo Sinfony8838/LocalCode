@@ -75,6 +75,11 @@ jobs:
         continue-on-error: true
         run: node scripts/acceptance-isolation.mjs
         working-directory: LocalCode/source
+      - name: Verify interface languages and persisted reply preferences
+        id: language_ui
+        continue-on-error: true
+        run: node scripts/acceptance-language.mjs
+        working-directory: LocalCode/source
       - run: npm audit --omit=dev --audit-level=high
         working-directory: LocalCode/source
       - name: Package Windows application
@@ -92,6 +97,8 @@ jobs:
           node scripts/acceptance-isolation.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/acceptance-typography.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/acceptance-language.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Create portable download and checksums
         shell: pwsh
@@ -122,7 +129,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if ('${{ steps.setup51.outcome }}' -ne 'success' -or '${{ steps.setup7.outcome }}' -ne 'success' -or '${{ steps.unit_tests.outcome }}' -ne 'success' -or '${{ steps.artifact_ui.outcome }}' -ne 'success' -or '${{ steps.model_ui.outcome }}' -ne 'success' -or '${{ steps.typography_ui.outcome }}' -ne 'success' -or '${{ steps.checkpoint_ui.outcome }}' -ne 'success' -or '${{ steps.isolation_ui.outcome }}' -ne 'success' -or '${{ steps.packaged_ui.outcome }}' -ne 'success') {
+          if ('${{ steps.setup51.outcome }}' -ne 'success' -or '${{ steps.setup7.outcome }}' -ne 'success' -or '${{ steps.unit_tests.outcome }}' -ne 'success' -or '${{ steps.artifact_ui.outcome }}' -ne 'success' -or '${{ steps.model_ui.outcome }}' -ne 'success' -or '${{ steps.typography_ui.outcome }}' -ne 'success' -or '${{ steps.checkpoint_ui.outcome }}' -ne 'success' -or '${{ steps.isolation_ui.outcome }}' -ne 'success' -or '${{ steps.language_ui.outcome }}' -ne 'success' -or '${{ steps.packaged_ui.outcome }}' -ne 'success') {
             throw 'All setup, unit, source desktop and packaged desktop suites must pass. No download is published on failure.'
           }
       - name: Retain tested Windows download

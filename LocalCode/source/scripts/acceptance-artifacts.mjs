@@ -75,6 +75,7 @@ async function launch() {
   page.on('response', response => { if (response.url().startsWith('localcode-preview:')) diagnostics.previewResponses.push({ url: response.url(), status: response.status(), headers: response.headers() }); });
   page.on('framenavigated', frame => diagnostics.frameNavigations.push({ url: frame.url(), name: frame.name() }));
   await page.getByLabel('任务输入').waitFor();
+  await page.bringToFront();
 }
 const state = id => page.evaluate(id => window.localcode.openSession(id), id);
 const terminal = (id, wanted = 'completed') => poll(async () => { const s = await state(id); if (['completed', 'failed', 'interrupted'].includes(s.status)) { assert.equal(s.status, wanted, s.error); return s; } }, `${id}: ${wanted}`);
@@ -93,22 +94,24 @@ try {
   await launch();
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, project);
   await page.getByRole('button', { name: '打开项目文件夹', exact: true }).first().click();
-  projectId = (await page.evaluate(() => window.localcode.bootstrap())).projects[0].id;
+  // Clicking returns before the asynchronous native picker and index write finish.
+  projectId = await poll(async () => (await page.evaluate(() => window.localcode.bootstrap())).projects[0]?.id, 'project selection persisted');
   await page.evaluate(url => window.localcode.saveProvider({ id: 'artifacts-fixture', name: 'Artifacts fixture', kind: 'openai', baseUrl: url, model: 'fixture', contextWindow: 16384, maxTokens: 1024, apiKey: 'artifacts-fixture-secret-not-real' }), baseUrl);
 
   const afterFirst = gate(), finalGate = gate();
   queue.push(
-    { text: '阶段性说明：正在创建网页，稍后继续检查。', tool: { name: 'write_file', args: { path: 'demo.html', content: html } } },
-    { gate: afterFirst.promise, text: '阶段性说明：现在更新项目记录。', tool: { name: 'edit_file', args: { path: 'notes.txt', oldText: 'Existing user note', newText: 'Existing user note\nFirst completed round' } } },
+    { text: '正在创建网页，稍后继续检查。', tool: { name: 'write_file', args: { path: 'demo.html', content: html } } },
+    { gate: afterFirst.promise, text: '现在更新项目记录。', tool: { name: 'edit_file', args: { path: 'notes.txt', oldText: 'Existing user note', newText: 'Existing user note\nFirst completed round' } } },
     { tool: { name: 'edit_file', args: { path: 'demo.html', oldText: '<p id="stage">初稿</p>', newText: '<p id="stage">最终网页</p>' } } },
     { gate: finalGate.promise, text: '已创建可交互网页，并更新项目记录。\n\n- 文件：[打开网页](demo.html)、[项目记录](notes.txt)\n- 参考：[外部参考链接](https://example.com/localcode-reference)\n- 验证：文件写入已完成；实际浏览器效果请通过预览查看。' },
   );
   const id = await newSession('ARTIFACT_COMPLETION_ROUND_ONE');
   const firstRun = (await state(id)).runId;
-  await poll(async () => { const s = await state(id); return s.tools.length === 1 && s.tools[0].status === 'completed' && s.messages.some(m => m.role === 'assistant' && !m.partial && m.text.includes('阶段性说明')); }, 'intermediate message ended');
-  const intermediateCopy = page.locator('.assistant-message').filter({ hasText: '阶段性说明：正在创建网页' }).getByRole('button', { name: '复制回答', exact: true });
+  await poll(async () => { const s = await state(id); return s.tools.length === 1 && s.tools[0].status === 'completed' && s.messages.some(m => m.role === 'assistant' && !m.partial && m.text === '正在创建网页，稍后继续检查。'); }, 'intermediate message ended');
+  const intermediateCopy = page.locator('.assistant-message').filter({ hasText: '正在创建网页，稍后继续检查。' }).getByRole('button', { name: '复制回答', exact: true });
   await intermediateCopy.waitFor({ state: 'visible' });
   assert(await intermediateCopy.count());
+  assert.equal(await page.locator('.assistant-message .markdown-body').first().innerText(), '正在创建网页，稍后继续检查。');
   assert.equal(await summaries().count(), 0, 'An ended/copyable intermediate message must not complete a run');
   await page.screenshot({ path: path.join(root, '01-intermediate-no-summary.png') });
   afterFirst.release();
@@ -259,6 +262,7 @@ try {
   await page.getByRole('menu').waitFor();
   const menuFits = await page.getByRole('menu').evaluate(element => { const box = element.getBoundingClientRect(); return box.left >= 0 && box.top >= 0 && box.right <= innerWidth + 1 && box.bottom <= innerHeight + 1; });
   assert(menuFits, 'Artifact context menu must fit viewport at 20px');
+  await page.bringToFront();
   await page.screenshot({ path: path.join(root, '05-dark-20px-history.png') });
   await page.keyboard.press('Escape'); await page.getByRole('menu').waitFor({ state: 'detached' }); assert.equal(await page.getByRole('menu').count(), 0);
   await app.close(); app = undefined; await launch(); await select(id);

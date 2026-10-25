@@ -1,5 +1,13 @@
 # Open-source release review
 
+## 0.1.15 source integration with multilingual main — RELEASE HOLD
+
+The next integration freezes main at `8ee612ef45e4d512e4226eb82ada1ad7827b59ea` (PR #5 languages and PR #7 progress wording), combined with the isolation/typography branch and the Restricted-parent acceptance launcher fix. Workspace capabilities, trusted session-to-project resolution and per-session storage checks remain intact. Worker requests carry both the complete workspace capability and the language captured when Send is accepted. CI retains isolation, typography and language checks for source and packaged Electron, plus the actual Restricted-parent launcher regression.
+
+Local source verification passed: TypeScript, production build, 181 unit/integration tests with 2 non-Windows skips across 22 files, and all six source Electron suites (isolation, typography, artifacts, checkpoints, model setup and language). Portable/launcher tests passed 5 checks with 1 Linux-only symlink check skipped on Windows; both Restricted-parent launcher cases passed. These tests used fabricated records and local synthetic protocol services. No real model was called and no new package was built during this integration validation.
+
+The previous packaged cloud result below remains historical evidence for its stated build; it does not establish acceptance of the newly integrated executable. Final committed-source CI, a rebuilt package and its actual task/archive checks are still needed, along with the outstanding clean-Windows and fresh default Ollama/reboot results. New P0 access-denial strings currently fall back to Chinese in non-Chinese interfaces when no translation mapping exists; the denial itself remains enforced.
+
 ## 0.1.15 integrated candidate update — external acceptance still pending
 
 The isolation branch was integrated with main `741fd199ca6187ab881b19bddda6056aecf40c10` (PR #4 typography). Both typography and isolation remain mandatory for source and packaged Electron. Commit `b745481133bc7bf0f6947669cdea787baf212259` passed [Windows CI 40197324773](https://github.com/Sinfony8838/LocalCode/actions/runs/40197324773): 155 tests passed, 2 non-Windows checks skipped. The same committed runtime passed all five local packaged suites: isolation, typography, artifacts, checkpoints and model setup.

@@ -1,3 +1,4 @@
+import { t, useLocale, setLocale, errorText } from './i18n';
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Eye, Pause, Play, Pin, X } from 'lucide-react';
@@ -6,13 +7,18 @@ import { PetSprite } from './PetSprite';
 import './pets.css';
 
 function FloatingPet() {
+  useLocale();
   const [state, setState] = useState<PetSnapshot>(), [error, setError] = useState(''), [hover, setHover] = useState(false);
   const [dragging, setDragging] = useState(false);
   const gesture = useRef<{ id: string; pointerId: number; screenX: number; screenY: number } | undefined>(undefined);
   const pendingFrame = useRef<number | undefined>(undefined);
-  useEffect(() => { void window.localpets.state().then(setState).catch(e => setError(String(e))); return window.localpets.onState(setState); }, []);
+  useEffect(() => {
+    const update = (snapshot: PetSnapshot) => { setLocale(snapshot.locale ?? 'zh-CN'); document.title = t('LocalCode 桌宠'); setState(snapshot); };
+    void window.localpets.state().then(update).catch(e => setError(errorText(e)));
+    return window.localpets.onState(update);
+  }, []);
   const character = state?.characters.find(c => c.id === state.preferences.selected);
-  const report = (promise: Promise<unknown>) => { void promise.catch(e => setError((e as Error).message)); };
+  const report = (promise: Promise<unknown>) => { void promise.catch(e => setError(errorText(e))); };
   const interactive = (value: boolean) => { setHover(value); report(window.localpets.interactive(value)); };
   const finishDrag = (phase: 'end' | 'cancel', point?: { screenX: number; screenY: number }) => {
     const active = gesture.current;
@@ -43,14 +49,14 @@ function FloatingPet() {
   if (!state || !character?.available) return null;
   return <div className={`lc-floating-pet ${hover ? 'hover' : ''}`} onMouseLeave={() => interactive(false)}>
     <div className="lc-pet-toolbar" onMouseEnter={() => interactive(true)}>
-      <button aria-label="打开 LocalCode" title="打开 LocalCode" onClick={() => report(window.localpets.action('open-main'))}><Eye size={13}/></button>
-      <button aria-label={state.preferences.paused ? '继续桌宠动画' : '暂停桌宠动画'} title={state.preferences.paused ? '继续动画' : '暂停动画'} onClick={() => report(window.localpets.save({ paused: !state.preferences.paused }))}>{state.preferences.paused ? <Play size={12}/> : <Pause size={12}/>}</button>
-      <button aria-label="切换桌宠置顶" title="切换置顶" aria-pressed={state.preferences.alwaysOnTop} onClick={() => report(window.localpets.save({ alwaysOnTop: !state.preferences.alwaysOnTop }))}><Pin size={12}/></button>
-      {state.characters.filter(c => c.available).map(c => <button className="lc-pet-switch" key={c.id} title={`切换为${c.name}`} aria-label={`切换为${c.name}`} aria-pressed={state.preferences.selected === c.id} onClick={() => report(window.localpets.save({ selected: c.id }))}>{c.name.slice(0, 1)}</button>)}
-      <button aria-label="隐藏桌宠" title="隐藏桌宠（可在应用内重新打开）" onClick={() => report(window.localpets.action('hide'))}><X size={13}/></button>
+      <button aria-label={t("打开 LocalCode")} title={t("打开 LocalCode")} onClick={() => report(window.localpets.action('open-main'))}><Eye size={13}/></button>
+      <button aria-label={state.preferences.paused ? t('继续桌宠动画') : t('暂停桌宠动画')} title={state.preferences.paused ? t('继续动画') : t('暂停动画')} onClick={() => report(window.localpets.save({ paused: !state.preferences.paused }))}>{state.preferences.paused ? <Play size={12}/> : <Pause size={12}/>}</button>
+      <button aria-label={t("切换桌宠置顶")} title={t("切换置顶")} aria-pressed={state.preferences.alwaysOnTop} onClick={() => report(window.localpets.save({ alwaysOnTop: !state.preferences.alwaysOnTop }))}><Pin size={12}/></button>
+      {state.characters.filter(c => c.available).map(c => <button className="lc-pet-switch" key={c.id} title={t('切换为{name}', { name: t(c.name) })} aria-label={t('切换为{name}', { name: t(c.name) })} aria-pressed={state.preferences.selected === c.id} onClick={() => report(window.localpets.save({ selected: c.id }))}>{c.id === 'paimon' ? 'A' : 'B'}</button>)}
+      <button aria-label={t("隐藏桌宠")} title={t("隐藏桌宠（可在应用内重新打开）")} onClick={() => report(window.localpets.action('hide'))}><X size={13}/></button>
     </div>
-    <button className="lc-pet-balloon" onMouseEnter={() => interactive(true)} title="点击查看任务" onClick={() => report(window.localpets.action('open-main'))}>{error || state.label}</button>
-    <div className={`lc-pet-drag ${dragging ? 'dragging' : ''}`} role="button" aria-label={`拖动${character.name}`} tabIndex={0}
+    <button className="lc-pet-balloon" onMouseEnter={() => interactive(true)} title={t("点击查看任务")} onClick={() => report(window.localpets.action('open-main'))}>{t(error || state.label)}</button>
+    <div className={`lc-pet-drag ${dragging ? 'dragging' : ''}`} role="button" aria-label={t('拖动{name}', { name: t(character.name) })} tabIndex={0}
       onMouseEnter={() => interactive(true)} onPointerDown={pointerDown} onPointerMove={pointerMove}
       onPointerUp={e => {
         if (gesture.current?.pointerId !== e.pointerId) return;

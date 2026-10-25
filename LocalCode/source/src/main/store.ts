@@ -7,6 +7,7 @@ import type { AgentEvent, AppSettings, Project, ProviderConfig, SessionView, The
 import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import { reduceAgentEvent } from '../shared/session-events';
 import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
+import { DEFAULT_LOCALE, isAppLocale, type AppLocale } from '../shared/i18n';
 import { beginRunChanges, discardRunChanges, finishRunChanges, recoverRunChanges } from '../core/run-changes';
 
 interface Index { version: 1; projects: Project[]; sessions: SessionView[]; settings: AppSettings; keys: Record<string, string> }
@@ -32,8 +33,9 @@ export class Store {
         const schema = z.object({ contextWindow: z.number().int().min(4096).max(131072), maxTokens: z.number().int().min(128).max(32768) }).strict().refine(v => v.maxTokens + 1536 < v.contextWindow);
         profile = schema.parse(JSON.parse(await fs.readFile(path.join(this.dataDir, '..', 'model-profile.json'), 'utf8')));
       } catch (error: any) { if (error.code !== 'ENOENT') throw new Error('本地模型配置无效，请检查 model-profile.json。'); }
-      this.state = { version: 1, projects: [], sessions: [], settings: { theme: 'light', fontSize: DEFAULT_FONT_SIZE, defaultProviderId: 'local', providers: [{ ...local, ...profile, id: 'local' }] }, keys: {} };
+      this.state = { version: 1, projects: [], sessions: [], settings: { theme: 'light', fontSize: DEFAULT_FONT_SIZE, locale: DEFAULT_LOCALE, defaultProviderId: 'local', providers: [{ ...local, ...profile, id: 'local' }] }, keys: {} };
     }
+    if (!isAppLocale(this.state.settings.locale)) this.state.settings.locale = DEFAULT_LOCALE;
     const fontSize = this.state.settings.fontSize;
     if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) this.state.settings.fontSize = DEFAULT_FONT_SIZE;
     for (const session of this.state.sessions) {
@@ -187,6 +189,11 @@ export class Store {
     await this.persist();
   }
   async setTheme(theme: Theme) { this.state.settings.theme = theme; await this.persist(); }
+  async setLocale(locale: AppLocale) {
+    if (!isAppLocale(locale)) throw new Error('语言设置无效。');
+    this.state.settings.locale = locale;
+    await this.persist();
+  }
   async setFontSize(fontSize: number) {
     if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) throw new Error('字号必须是 12–20 之间的整数。');
     this.state.settings.fontSize = fontSize;

@@ -13,6 +13,7 @@ import { inspectLocalModel, localModelProbeSchema } from './local-model-health';
 import { managedOllamaState, startManagedOllama } from './managed-ollama';
 import { providerSchema, testConnection } from './providers';
 import { selectProviderModel } from '../shared/providers';
+import { translate } from '../shared/i18n';
 import { PetController } from './pets';
 import { workspaceBoundary } from '../core/workspace-context';
 import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange, previewChangeCheckpoint, checkpointChange } from '../core/workspace';
@@ -32,9 +33,10 @@ protocol.registerSchemesAsPrivileged([
   { scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
 const store = new Store(dataDir);
+const tr = (source: string, values?: Record<string, string | number>) => translate(store.settings().locale, source, values);
 const artifacts = new ArtifactController();
 let window: BrowserWindow | undefined;
-const pets = new PetController(home, __dirname, () => window, () => { window?.restore(); window?.show(); window?.focus(); });
+const pets = new PetController(home, __dirname, () => window, () => { window?.restore(); window?.show(); window?.focus(); }, () => store.settings().locale);
 type ActiveRun = { runId: string; sessionId: string; apiKey?: string; child: UtilityProcess; requestGroup: string };
 const requestScheduler = new RequestScheduler();
 const runs = new Map<string, ActiveRun>();
@@ -118,7 +120,7 @@ function createWorker(sessionId: string, apiKey?: string) {
     eventQueue = eventQueue.then(async () => {
       // Never sweep another live session's command ownership records.
       if (workerPid) await cleanupCommands(workerPid);
-      if (ended && runs.get(sessionId)?.child === child && runs.get(sessionId)?.runId === ended.runId) await processEvent({ type: 'settled', ...ended, status: 'interrupted', error: `Agent 进程退出（${code}），未自动重放任何命令。` });
+      if (ended && runs.get(sessionId)?.child === child && runs.get(sessionId)?.runId === ended.runId) await processEvent({ type: 'settled', ...ended, status: 'interrupted', error: tr('Agent 进程退出（{code}），未自动重放任何命令。', { code: code ?? 'unknown' }) });
     }).catch(error => { log.write(`Worker exit: ${error.message}\n`); });
     const recovery = eventQueue;
     recovering.set(sessionId, recovery);
@@ -156,7 +158,7 @@ async function stopRunOnce(sessionId: string) {
       await exited;
       await recovering.get(sessionId);
     }
-    await processEvent({ type: 'settled', runId, sessionId, status: 'interrupted', error: '任务已强制停止。未自动重试命令。' });
+    await processEvent({ type: 'settled', runId, sessionId, status: 'interrupted', error: tr('任务已强制停止。未自动重试命令。') });
   }
 }
 
@@ -176,21 +178,24 @@ const schemas: Record<string, z.ZodType> = {
   inspectLocalModel: localModelProbeSchema, startLocalService: z.undefined(),
   deleteProvider: providerId,
   testProvider: z.object({ providerId, modelId: z.string().min(1).max(200).optional() }).strict(),
-  setTheme: z.enum(['light', 'dark']), setFontSize: z.number().int().min(12).max(20), health: z.undefined(), openDataFolder: z.undefined(),
+  setTheme: z.enum(['light', 'dark']), setLocale: z.enum(['zh-CN', 'en', 'ja', 'ko']), setFontSize: z.number().int().min(12).max(20), health: z.undefined(), openDataFolder: z.undefined(),
 };
 function assertChangesIdle() {
-  if (runs.size || starting.size || recovering.size || changingFiles) throw new Error('请等待所有任务及恢复操作结束，再撤销文件修改或确认新起点。');
+  if (runs.size || starting.size || recovering.size || changingFiles) throw new Error(tr('请等待所有任务及恢复操作结束，再撤销文件修改或确认新起点。'));
 }
 async function invoke(method: string, arg: any) {
   switch (method) {
     case 'bootstrap': { const currentHealth = await health(); await eventQueue; return { projects: store.projects(), sessions: store.sessions(), settings: store.settings(), health: currentHealth, version: app.getVersion() }; }
-    case 'pickProject': { const choice = await dialog.showOpenDialog(window!, { title: '选择编程项目', properties: ['openDirectory'] }); if (choice.canceled || !choice.filePaths[0]) return null; const p = await store.addProject(choice.filePaths[0]); emit({ type: 'state_changed' }); return p; }
+    case 'pickProject': { const choice = await dialog.showOpenDialog(window!, { title: tr('选择编程项目'), properties: ['openDirectory'] }); if (choice.canceled || !choice.filePaths[0]) return null; const p = await store.addProject(choice.filePaths[0]); emit({ type: 'state_changed' }); return p; }
     case 'createSession': return store.createSession(arg);
     case 'openSession': await eventQueue; return structuredClone(store.session(arg));
     case 'renameSession': return store.renameSession(arg.sessionId, arg.title);
     case 'send': {
-      if (changingFiles) throw new Error('正在保存文件修改记录，请稍后再开始任务。');
-      if (quitting || runs.has(arg.sessionId) || starting.has(arg.sessionId)) throw new Error('此会话已有任务运行中，请先停止或等待完成。');
+      if (changingFiles) throw new Error(tr('正在保存文件修改记录，请稍后再开始任务。'));
+      if (quitting || runs.has(arg.sessionId) || starting.has(arg.sessionId)) throw new Error(tr('此会话已有任务运行中，请先停止或等待完成。'));
+      // A turn retains the language selected when Send was accepted, even if
+      // settings change while its workspace/model preflight is still pending.
+      const locale = store.settings().locale;
       const startup = { cancelled: false };
       starting.set(arg.sessionId, startup);
       let active: ActiveRun | undefined;
@@ -200,19 +205,19 @@ async function invoke(method: string, arg: any) {
       await eventQueue;
       await workspaceBoundary(store.sessionWorkspace(arg.sessionId));
       const provider = selectProviderModel(store.provider(arg.providerId), arg.modelId);
-      if (provider.kind === 'ollama') { const h = await health(); if (!h.online || !h.modelAvailable) throw new Error(h.message || '本地模型不可用'); }
+      if (provider.kind === 'ollama') { const h = await health(); if (!h.online || !h.modelAvailable) throw new Error(h.message || tr('本地模型不可用')); }
       const cipher = store.encryptedKey(provider.id);
       const secret: ProviderSecret = { ...provider, apiKey: provider.kind === 'ollama' ? 'ollama' : cipher ? safeStorage.decryptString(Buffer.from(cipher, 'base64')) : '' };
-      if (provider.kind !== 'ollama' && !secret.apiKey) throw new Error('请先在设置中保存此 API 的密钥。');
-      if (quitting || startup.cancelled) throw new Error('启动已取消。');
+      if (provider.kind !== 'ollama' && !secret.apiKey) throw new Error(tr('请先在设置中保存此 API 的密钥。'));
+      if (quitting || startup.cancelled) throw new Error(tr('启动已取消。'));
       const session = await store.beginRun(arg.sessionId, arg.prompt, arg.providerId, provider.model);
       begun = session;
       const child = createWorker(session.id, provider.kind !== 'ollama' ? secret.apiKey : undefined);
       const requestGroup = new URL(provider.baseUrl).origin + ':' + createHash('sha256').update(secret.apiKey).digest('hex');
       active = { runId: session.runId!, sessionId: session.id, apiKey: provider.kind !== 'ollama' ? secret.apiKey : undefined, child, requestGroup };
       runs.set(session.id, active);
-      if (quitting || startup.cancelled) throw new Error('启动已取消，任务未执行。');
-      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, ...store.sessionWorkspace(session.id), piFile: session.piFile, provider: secret, prompt: arg.prompt });
+      if (quitting || startup.cancelled) throw new Error(tr('启动已取消，任务未执行。'));
+      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, ...store.sessionWorkspace(session.id), piFile: session.piFile, provider: secret, prompt: arg.prompt, locale });
       emit({ type: 'state_changed' }); return { runId: session.runId };
       } catch (error) {
         if (active) await processEvent({ type: 'settled', runId: active.runId, sessionId: active.sessionId, status: quitting || startup.cancelled ? 'interrupted' : 'failed', error: (error as Error).message });
@@ -224,7 +229,7 @@ async function invoke(method: string, arg: any) {
       } finally { starting.delete(arg.sessionId); }
     }
     case 'stop': await stopRun(arg); return;
-    case 'approve': { const active = [...runs.values()].find(run => run.runId === arg.runId); if (!active) throw new Error('审批已失效，命令未执行。'); const approval = store.session(active.sessionId).approval; if (!approval || approval.id !== arg.approvalId || approval.runId !== arg.runId) throw new Error('审批不匹配或已失效。'); post(active, { type: 'approve', ...arg }); return; }
+    case 'approve': { const active = [...runs.values()].find(run => run.runId === arg.runId); if (!active) throw new Error(tr('审批已失效，命令未执行。')); const approval = store.session(active.sessionId).approval; if (!approval || approval.id !== arg.approvalId || approval.runId !== arg.runId) throw new Error(tr('审批不匹配或已失效。')); post(active, { type: 'approve', ...arg }); return; }
     case 'listFiles': return listWorkspaceFiles(store.workspace(arg.projectId), arg.directory || '');
     case 'readFile': return readWorkspaceFile(store.workspace(arg.projectId), arg.path);
     case 'artifactInfo': return artifacts.info(store.workspace(arg.projectId), arg.path, arg.inputKind);
@@ -244,23 +249,30 @@ async function invoke(method: string, arg: any) {
       } finally { changingFiles = false; }
       return;
     }
-    case 'saveProvider': { if (runs.size || starting.size || localServiceStart) throw new Error('任务或本地服务启动期间不能修改模型配置。'); const { apiKey, ...publicData } = arg; let cipher: string | undefined; if (apiKey) { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 密钥加密暂不可用，未保存密钥。'); cipher = safeStorage.encryptString(apiKey).toString('base64'); } const p = await store.saveProvider({ ...publicData, hasKey: false }, cipher); emit({ type: 'state_changed' }); return p; }
-    case 'deleteProvider': { if (runs.size || starting.size) throw new Error('任务运行时不能删除供应商。'); await store.deleteProvider(arg); emit({ type: 'state_changed' }); return; }
+    case 'saveProvider': { if (runs.size || starting.size || localServiceStart) throw new Error(tr('任务或本地服务启动期间不能修改模型配置。')); const { apiKey, ...publicData } = arg; let cipher: string | undefined; if (apiKey) { if (!safeStorage.isEncryptionAvailable()) throw new Error(tr('Windows 密钥加密暂不可用，未保存密钥。')); cipher = safeStorage.encryptString(apiKey).toString('base64'); } const p = await store.saveProvider({ ...publicData, hasKey: false }, cipher); emit({ type: 'state_changed' }); return p; }
+    case 'deleteProvider': { if (runs.size || starting.size) throw new Error(tr('任务运行时不能删除供应商。')); await store.deleteProvider(arg); emit({ type: 'state_changed' }); return; }
     case 'testProvider': {
-      if (runs.size || starting.size) throw new Error('请等待当前任务结束后测试连接。');
+      if (runs.size || starting.size) throw new Error(tr('请等待当前任务结束后测试连接。'));
       const provider = selectProviderModel(store.provider(arg.providerId), arg.modelId);
-      if (provider.kind === 'ollama') throw new Error('请使用 Ollama 状态刷新。');
+      if (provider.kind === 'ollama') throw new Error(tr('请使用 Ollama 状态刷新。'));
       const cipher = store.encryptedKey(provider.id);
-      if (!cipher) throw new Error('请先保存 API Key。');
-      return testConnection({ ...provider, apiKey: safeStorage.decryptString(Buffer.from(cipher, 'base64')) });
+      if (!cipher) throw new Error(tr('请先保存 API Key。'));
+      try { return await testConnection({ ...provider, apiKey: safeStorage.decryptString(Buffer.from(cipher, 'base64')) }); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        const status = /^HTTP (\d{3}) · (.+)$/.exec(message);
+        if (status) throw new Error(`HTTP ${status[1]} · ${tr(status[2])}`);
+        throw error;
+      }
     }
     case 'setTheme': await store.setTheme(arg); return;
+    case 'setLocale': await store.setLocale(arg); pets.refreshLocale(); emit({ type: 'state_changed' }); return;
     case 'setFontSize': await store.setFontSize(arg); return;
     case 'health': return health();
     case 'inspectLocalModel': return inspectLocalModel(arg, { managedState: () => managedOllamaState(home) });
     case 'startLocalService': {
-      if (runs.size || starting.size) throw new Error('请等待当前任务结束后启动本地服务。');
-      if (store.provider('local').ollamaMode === 'existing') throw new Error('已有 Ollama 由你自行管理，应用不会启动或停止它。');
+      if (runs.size || starting.size) throw new Error(tr('请等待当前任务结束后启动本地服务。'));
+      if (store.provider('local').ollamaMode === 'existing') throw new Error(tr('已有 Ollama 由你自行管理，应用不会启动或停止它。'));
       if (localServiceStart) return localServiceStart;
       localServiceStart = startManagedOllama(home).then(() => health());
       try { return await localServiceStart; } finally { localServiceStart = undefined; }
@@ -323,11 +335,17 @@ else {
     await store.init(); await cleanupCommands();
     ipcMain.handle('localcode:pet', (event, method, argument) => pets.invoke(event, method, argument));
     ipcMain.handle('localcode:invoke', async (event, method: string, argument: unknown) => {
-      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !event.senderFrame?.url.startsWith('localcode://app/')) throw new Error('无效调用来源');
-      if (typeof method !== 'string' || !Object.hasOwn(schemas, method)) throw new Error('无效操作');
+      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !event.senderFrame?.url.startsWith('localcode://app/')) throw new Error(tr('无效调用来源'));
+      if (typeof method !== 'string' || !Object.hasOwn(schemas, method)) throw new Error(tr('无效操作'));
       const parsed = schemas[method].safeParse(argument);
-      if (!parsed.success) throw new Error(`参数无效：${parsed.error.issues.map(i => i.message).join('；')}`);
-      return invoke(method, parsed.data);
+      if (!parsed.success) throw new Error(tr('参数无效：{details}', { details: parsed.error.issues.map(i => tr(i.message)).join('; ') }));
+      try { return await invoke(method, parsed.data); }
+      catch (error) {
+        // Zod's default JSON error includes unlocalized custom messages. Expose
+        // only translated issue messages, never validation input or credentials.
+        if (error instanceof z.ZodError) throw new Error(error.issues.map(issue => tr(issue.message)).join('\n'));
+        throw error;
+      }
     });
     await createWindow();
     if (quitting) return;

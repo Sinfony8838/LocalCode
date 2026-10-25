@@ -1,5 +1,6 @@
 import type { WorkspaceContext } from '../core/workspace-context';
 import type { ArtifactInfo, ArtifactAction, ArtifactInputKind } from './artifacts';
+import type { AppLocale } from './i18n';
 export type RunStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'interrupted';
 export type Theme = 'light' | 'dark';
 export const DEFAULT_FONT_SIZE = 14;
@@ -17,7 +18,7 @@ export interface SessionView { id: string; projectId: string; title: string; cre
 export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean }
 export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; ollamaMode?: 'managed' | 'existing' }
 export interface ProviderSecret extends ProviderConfig { apiKey: string }
-export interface AppSettings { theme: Theme; fontSize: number; defaultProviderId: string; providers: ProviderConfig[] }
+export interface AppSettings { theme: Theme; fontSize: number; locale: AppLocale; defaultProviderId: string; providers: ProviderConfig[] }
 export interface LocalModelProbe { baseUrl: string; model: string; contextWindow: number; ollamaMode?: 'managed' | 'existing' }
 export interface ModelHealth { status?: 'ready' | 'offline' | 'missing_model' | 'invalid_response' | 'invalid_config' | 'unverified_service' | 'missing_runtime'; installedModels?: string[]; online: boolean; modelAvailable: boolean; model: string; contextWindow: number; version?: string; gpuPercent?: number; message?: string }
 export interface FileEntry { path: string; name: string; directory: boolean }
@@ -44,7 +45,7 @@ export type AgentEvent = { runId: string; sessionId: string; recordedAt?: string
  | { type: 'settled'; status: 'completed' | 'failed' | 'interrupted'; error?: string; summary?: RunSummary }
  | { type: 'notice'; message: string }
 );
-export interface RunRequest extends WorkspaceContext { type: 'run'; runId: string; sessionId: string; piFile?: string; provider: ProviderSecret; prompt: string }
+export interface RunRequest extends WorkspaceContext { type: 'run'; runId: string; sessionId: string; piFile?: string; provider: ProviderSecret; prompt: string; locale?: AppLocale }
 export type WorkerCommand = RunRequest | { type: 'approve'; runId: string; approvalId: string; allow: boolean } | { type: 'abort'; runId: string } | { type: 'shutdown' };
 export type TransportMessage = { runId: string; sessionId: string; requestId: string } & ({ type: 'request_acquire' } | { type: 'request_release'; cooldownUntil?: number } | { type: 'request_cancel' });
 export type TransportGrant = { type: 'request_grant'; runId: string; requestId: string };
@@ -71,6 +72,7 @@ export interface LocalCodeApi {
  deleteProvider(providerId: string): Promise<void>;
  testProvider(input: {providerId: string; modelId?: string}): Promise<{message: string}>;
  setTheme(theme: Theme): Promise<void>;
+ setLocale(locale: AppLocale): Promise<void>;
  setFontSize(fontSize: number): Promise<void>;
  health(): Promise<ModelHealth>;
  inspectLocalModel(input: LocalModelProbe): Promise<ModelHealth>;

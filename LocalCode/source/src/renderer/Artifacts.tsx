@@ -1,3 +1,4 @@
+import { t, useLocale, errorText } from './i18n';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Code2, Copy, ExternalLink, FileCode2, FolderOpen, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, RefreshCw, X } from 'lucide-react';
 import type { ArtifactAction, ArtifactInfo, ArtifactInputKind } from '../shared/artifacts';
@@ -61,7 +62,7 @@ export function useArtifactController({ projectId, onError, onOpen }: { projectI
     try {
       const info = await window.localcode.artifactInfo({ projectId, path, inputKind });
       if (menuRequest.current === revision) setMenu({ path: info.path, ...position, info, trigger: target });
-    } catch (error) { if (menuRequest.current === revision) setMenu({ path, ...position, error: error instanceof Error ? error.message : String(error), trigger: target }); }
+    } catch (error) { if (menuRequest.current === revision) setMenu({ path, ...position, error: errorText(error), trigger: target }); }
   };
   const closeMenu = (restore = false) => { menuRequest.current++; if (restore) menu?.trigger?.focus(); setMenu(null); };
   return { artifact, source, mode, loading, expanded, reload, menu, open, close, act, openExternal, showMenu, closeMenu, setExpanded };
@@ -79,17 +80,19 @@ export function ArtifactLink({ path, inputKind = 'path', children, className = '
 }
 
 export function ArtifactPanel({ controller: c }: { controller: ArtifactController }) {
+  useLocale();
   if (!c.artifact && !c.loading) return null;
   const info = c.artifact;
-  return <aside className={`artifact-panel ${c.expanded ? 'expanded' : ''}`} aria-label="文件查看器">
-    <header className="artifact-header"><FileCode2 size={16} /><strong title={info?.absolutePath}>{info?.name || '正在打开文件…'}</strong><button className="icon-button" aria-label={c.expanded ? '还原预览大小' : '展开预览'} onClick={() => c.setExpanded(!c.expanded)}>{c.expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button><button className="icon-button" aria-label="关闭文件预览" onClick={c.close}><X size={16} /></button></header>
-    {info && <div className="artifact-toolbar"><div role="group" aria-label="文件查看方式"><button className={c.mode === 'preview' ? 'active' : ''} disabled={!info.previewUrl} onClick={() => void c.open(info.path, 'preview')}>预览</button><button className={c.mode === 'source' ? 'active' : ''} disabled={!['html', 'text'].includes(info.kind)} onClick={() => void c.open(info.path, 'source')}>源码</button></div><button className="icon-button" aria-label="刷新文件预览" onClick={() => void c.open(info.path, c.mode)}><RefreshCw size={14} /></button><button className="icon-button" aria-label="文件打开方式" onClick={event => void c.showMenu(event, info.path)}><MoreHorizontal size={17} /></button></div>}
-    {c.loading ? <div className="panel-loading"><LoaderCircle size={20} className="spin" />正在读取文件…</div> : info && (c.mode === 'source' ? <><div className="file-readonly">只读源码{c.source?.truncated && ' · 内容已截断'}</div><pre className="artifact-source" tabIndex={0}>{c.source?.content}</pre></> : info.previewUrl ? <iframe key={`${info.previewUrl}-${c.reload}`} className="artifact-frame" title="文件预览" src={info.previewUrl} sandbox="allow-scripts" referrerPolicy="no-referrer" /> : <div className="panel-empty"><FileCode2 size={30} /><h3>使用其他应用查看此文件</h3><p>{info.name}</p><button className="secondary-button" disabled={!info.canOpenExternally} onClick={() => void c.act(info.path, 'open')}><ExternalLink size={15} />使用默认应用打开</button><button className="secondary-button" onClick={() => void c.act(info.path, 'reveal')}><FolderOpen size={15} />打开所在目录</button></div>)}
-    {info && <footer className="artifact-footer" title={info.absolutePath}>{info.path}{c.mode === 'preview' && info.kind === 'html' ? ' · 本地预览' : ''}</footer>}
+  return <aside className={`artifact-panel ${c.expanded ? 'expanded' : ''}`} aria-label={t("文件查看器")}>
+    <header className="artifact-header"><FileCode2 size={16} /><strong title={info?.absolutePath}>{info?.name || t('正在打开文件…')}</strong><button className="icon-button" aria-label={c.expanded ? t('还原预览大小') : t('展开预览')} onClick={() => c.setExpanded(!c.expanded)}>{c.expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button><button className="icon-button" aria-label={t("关闭文件预览")} onClick={c.close}><X size={16} /></button></header>
+    {info && <div className="artifact-toolbar"><div role="group" aria-label={t("文件查看方式")}><button className={c.mode === 'preview' ? 'active' : ''} disabled={!info.previewUrl} onClick={() => void c.open(info.path, 'preview')}>{t('预览')}</button><button className={c.mode === 'source' ? 'active' : ''} disabled={!['html', 'text'].includes(info.kind)} onClick={() => void c.open(info.path, 'source')}>{t('源码')}</button></div><button className="icon-button" aria-label={t("刷新文件预览")} onClick={() => void c.open(info.path, c.mode)}><RefreshCw size={14} /></button><button className="icon-button" aria-label={t("文件打开方式")} onClick={event => void c.showMenu(event, info.path)}><MoreHorizontal size={17} /></button></div>}
+    {c.loading ? <div className="panel-loading"><LoaderCircle size={20} className="spin" />{t('正在读取文件…')}</div> : info && (c.mode === 'source' ? <><div className="file-readonly">{t('只读源码')}{c.source?.truncated && t(' · 内容已截断')}</div><pre className="artifact-source" tabIndex={0}>{c.source?.content}</pre></> : info.previewUrl ? <iframe key={`${info.previewUrl}-${c.reload}`} className="artifact-frame" title={t("文件预览")} src={info.previewUrl} sandbox="allow-scripts" referrerPolicy="no-referrer" /> : <div className="panel-empty"><FileCode2 size={30} /><h3>{t('使用其他应用查看此文件')}</h3><p>{info.name}</p><button className="secondary-button" disabled={!info.canOpenExternally} onClick={() => void c.act(info.path, 'open')}><ExternalLink size={15} />{t('使用默认应用打开')}</button><button className="secondary-button" onClick={() => void c.act(info.path, 'reveal')}><FolderOpen size={15} />{t('打开所在目录')}</button></div>)}
+    {info && <footer className="artifact-footer" title={info.absolutePath}>{info.path}{c.mode === 'preview' && info.kind === 'html' ? t(' · 本地预览') : ''}</footer>}
   </aside>;
 }
 
 export function ArtifactMenu({ controller: c }: { controller: ArtifactController }) {
+  useLocale();
   const panel = useRef<HTMLDivElement>(null);
   const menu = c.menu;
   useEffect(() => {
@@ -106,21 +109,21 @@ export function ArtifactMenu({ controller: c }: { controller: ArtifactController
   if (!menu) return null;
   const info = menu.info;
   const choose = (action: ViewMode | ArtifactAction) => { c.closeMenu(); if (action === 'preview' || action === 'source') void c.open(menu.path, action); else void c.act(menu.path, action); };
-  return <div ref={panel} role="menu" aria-label="文件打开方式" className="artifact-menu" style={{ left: Math.max(8, Math.min(menu.x, innerWidth - 294)), top: Math.max(8, Math.min(menu.y, innerHeight - 350)) }} onKeyDown={event => {
+  return <div ref={panel} role="menu" aria-label={t("文件打开方式")} className="artifact-menu" style={{ left: Math.max(8, Math.min(menu.x, innerWidth - 294)), top: Math.max(8, Math.min(menu.y, innerHeight - 350)) }} onKeyDown={event => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault(); const buttons = [...panel.current!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
     const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
     buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (i + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length]?.focus();
   }}>
     <div className="artifact-menu-name" title={menu.path}>{info?.name || menu.path}</div>
-    {!info ? <p>{menu.error || '正在读取文件信息…'}</p> : <>
-      <button role="menuitem" disabled={!info.previewUrl} onClick={() => choose('preview')}><FileCode2 size={15} />在应用内预览</button>
-      <button role="menuitem" disabled={!['html', 'text'].includes(info.kind)} onClick={() => choose('source')}><Code2 size={15} />查看源码</button>
+    {!info ? <p>{menu.error ? t(menu.error) : t('正在读取文件信息…')}</p> : <>
+      <button role="menuitem" disabled={!info.previewUrl} onClick={() => choose('preview')}><FileCode2 size={15} />{t('在应用内预览')}</button>
+      <button role="menuitem" disabled={!['html', 'text'].includes(info.kind)} onClick={() => choose('source')}><Code2 size={15} />{t('查看源码')}</button>
       <div className="artifact-menu-divider" />
-      <button role="menuitem" disabled={!info.canOpenExternally} onClick={() => choose('open')}><ExternalLink size={15} />使用默认应用打开</button>
-      <button role="menuitem" onClick={() => choose('choose-app')}><MoreHorizontal size={15} />选择其他应用打开</button>
-      <button role="menuitem" onClick={() => choose('reveal')}><FolderOpen size={15} />在文件资源管理器中显示</button>
-      <button role="menuitem" onClick={() => choose('copy-path')}><Copy size={15} />复制完整路径</button>
+      <button role="menuitem" disabled={!info.canOpenExternally} onClick={() => choose('open')}><ExternalLink size={15} />{t('使用默认应用打开')}</button>
+      <button role="menuitem" onClick={() => choose('choose-app')}><MoreHorizontal size={15} />{t('选择其他应用打开')}</button>
+      <button role="menuitem" onClick={() => choose('reveal')}><FolderOpen size={15} />{t('在文件资源管理器中显示')}</button>
+      <button role="menuitem" onClick={() => choose('copy-path')}><Copy size={15} />{t('复制完整路径')}</button>
     </>}
   </div>;
 }
