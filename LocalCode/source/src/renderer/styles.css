@@ -97,12 +97,24 @@ svg { flex-shrink: 0; }
 .rail-button:hover, .rail-button.active { background: var(--hover); color: var(--text); }
 .rail-divider { height: 1px; background: var(--border-strong); width: 22px; margin: 2px 0; opacity: .65; }
 .rail-spacer { flex: 1; }
-.local-avatar { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #eeb7ce; color: #65364d; font-size: 0.625rem; font-weight: 600; }
+.user-menu-anchor { position: relative; flex-shrink: 0; }
+.user-menu-trigger { border-radius: 50%; background: var(--hover); color: var(--text); }
+.user-menu-popover { position: fixed; z-index: 70; left: 50px; bottom: 12px; width: 252px; max-width: calc(100vw - 64px); max-height: calc(100vh - 24px); overflow: auto; padding: 7px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); color: var(--text); }
+.user-menu-heading { display: flex; align-items: center; gap: 10px; padding: 10px 9px; }
+.user-menu-avatar { width: 35px; height: 35px; display: grid; place-items: center; flex-shrink: 0; background: var(--hover); border-radius: 50%; }
+.user-menu-heading strong { display: block; font-size: .8125rem; font-weight: 600; }
+.user-menu-heading p { margin: 4px 0 0; font-size: .6875rem; color: var(--muted); }
+.user-menu-divider { border-top: 1px solid var(--border); margin: 4px 5px 6px; }
+.user-menu-popover > button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; font-size: .8125rem; text-align: left; }
+.user-menu-popover > button:hover, .user-menu-popover > button:focus-visible { background: var(--hover); outline-offset: -2px; }
 .drag-region { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 .icon-button { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); flex-shrink: 0; }
 .icon-button:hover:not(:disabled) { color: var(--text); background: var(--hover); }
-.brand-mark { width: 31px; height: 31px; border: 1px solid var(--border-strong); background: var(--surface); border-radius: 10px; display: grid; place-items: center; color: var(--accent); }
+.brand-mark { width: 31px; height: 31px; display: grid; place-items: center; }
+.app-logo { display: block; width: 100%; height: 100%; object-fit: contain; flex-shrink: 0; }
+.sidebar-brand > .app-logo { width: 24px; height: 24px; }
+.settings-nav .app-logo { width: 16px; height: 16px; }
 .sidebar { background: var(--sidebar); display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); border-radius: 13px 0 0 13px; overflow: hidden; }
 .sidebar-brand { height: 49px; display: flex; align-items: center; gap: 6px; padding: 0 15px; font-size: 1.125rem; font-weight: 600; letter-spacing: -.5px; flex-shrink: 0; }
 .sidebar-brand > svg { color: var(--faint); }

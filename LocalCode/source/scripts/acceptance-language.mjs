@@ -79,7 +79,8 @@ async function assertLocale(locale) {
   assert.equal(await pet.locator('.lc-pet-balloon').innerText(), text.balloon);
   assert.equal(await pet.locator('.lc-pet-toolbar button').first().getAttribute('aria-label'), text.open);
 }
-async function settings() { await page.locator('.activity-rail button').last().click(); await page.locator('.settings-dialog').waitFor(); }
+// The user-menu trigger is nested in its own anchor below the settings button.
+async function settings() { await page.locator('.activity-rail > button').last().click(); await page.locator('.settings-dialog').waitFor(); }
 async function languageTab() { await page.locator('.settings-nav button').nth(1).click(); }
 
 try {

@@ -1,3 +1,5 @@
+<p align="center"><img src="LocalCode/source/src/renderer/public/branding/localcode-logo.png" alt="LocalCode" width="120" /></p>
+
 # LocalCode
 
 **English** | [简体中文](README.zh-CN.md)
@@ -217,3 +219,5 @@ python scripts\release_scan.py
 The scanner inspects exact staged blobs, blocks runtime/credential artifacts, and detects several secret formats. It is a guardrail, not a complete security audit. CI repeats this check; maintainers must also review code, licenses, and dependency advisories. See [release review](docs/RELEASE_REVIEW.md).
 
 Source: [MIT](LICENSE). Dependencies retain their own licenses. Qwen weights and Ollama are fetched from upstream and are not redistributed by this repository. See [third-party notices](THIRD_PARTY_NOTICES.md). The application is unsigned; Windows may show a reputation warning.
+
+The project logo is stored in `LocalCode/source/src/renderer/public/branding/`. The supplied PNG is preserved as-is; `localcode.ico` contains 16–256 px Windows icon frames. To regenerate the ICO on Windows, run `powershell -NoProfile -File LocalCode/source/scripts/generate-icons.ps1`. If the artwork changes, review and update the exact asset hashes in `scripts/release_scan.py`.
