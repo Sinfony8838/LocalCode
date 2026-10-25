@@ -46,6 +46,46 @@ describe('durable UI index', () => {
     await expect(new Store(path.join(bad, 'data')).init()).rejects.toThrow('本地模型配置无效');
     await expect(fs.access(path.join(bad, 'data/index.json'))).rejects.toThrow();
   });
+  it('starts projectless conversations without a workspace snapshot, then moves the same transcript into a project', async () => {
+    const { root, project } = await setup();
+    const store = new Store(path.join(root, 'chat-data')); await store.init();
+    const chat = await store.createSession(); expect(store.projects()).toEqual([]); expect(chat.projectId).toBeNull();
+    const run = await store.beginRun(chat.id, '先讨论想法', 'local');
+    const base = { sessionId: chat.id, runId: run.runId! };
+    await store.event({ ...base, type: 'message_end', messageId: 'chat-answer', text: '可以先聊，不需要文件夹。' });
+    await store.event({ ...base, type: 'session_file', file: 'private-chat-transcript.jsonl' });
+    await store.event({ ...base, type: 'settled', status: 'completed' });
+    const completed = structuredClone(store.session(chat.id));
+    expect(completed.runs?.[0]).toMatchObject({ status: 'completed', changes: [], changeScope: 'file_tools' });
+    expect(completed.runs?.[0].changesError).toBeUndefined();
+    await expect(fs.stat(path.join(store.dataDir, 'changes', chat.id, 'runs'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(store.moveSession(chat.id, randomUUID())).rejects.toThrow('项目不存在');
+    expect(store.session(chat.id).projectId).toBeNull();
+    const target = await store.addProject(project);
+    const moved = await store.moveSession(chat.id, target.id);
+    expect(moved.id).toBe(chat.id); expect(moved.messages).toEqual(completed.messages);
+    expect(moved.runs).toEqual(completed.runs); expect(moved.piFile).toBe(completed.piFile);
+    expect(await store.moveSession(chat.id, target.id)).toEqual(moved);
+    const reopened = new Store(store.dataDir); await reopened.init();
+    expect(reopened.session(chat.id)).toEqual(moved);
+    const otherPath = path.join(root, 'other-project'); await fs.mkdir(otherPath);
+    const other = await reopened.addProject(otherPath);
+    await expect(reopened.moveSession(chat.id, other.id)).rejects.toThrow('已属于项目');
+  });
+  it('persists project pinning and collapsed sections without changing historical project ownership', async () => {
+    const { store, p, s } = await setup();
+    await store.setProjectPinned(p.id, true);
+    await store.setSidebar({ projectsCollapsed: true, recentCollapsed: true, collapsedProjects: [p.id] });
+    const reopened = new Store(store.dataDir); await reopened.init();
+    expect(reopened.project(p.id).pinned).toBe(true);
+    expect(reopened.settings().sidebar).toMatchObject({ projectsCollapsed: true, recentCollapsed: true, collapsedProjects: [p.id] });
+    expect(reopened.session(s.id).projectId).toBe(p.id);
+    await reopened.setProjectPinned(p.id, false); expect(reopened.project(p.id).pinned).toBe(false);
+    await expect(reopened.setSidebar({ collapsedProjects: [randomUUID()] })).rejects.toThrow('项目不存在');
+    const standalone = await reopened.createSession(null); await reopened.beginRun(standalone.id, 'running', 'local');
+    await expect(reopened.moveSession(standalone.id, p.id)).rejects.toThrow('任务结束');
+    expect(reopened.session(standalone.id).projectId).toBeNull();
+  });
   it('persists multiple models and toggles, preserves blank-key edits, and deletes only provider credentials', async () => {
     const { store, p, s } = await setup();
     await store.saveProvider({ id: 'ark', name: 'Ark', kind: 'anthropic', baseUrl: 'https://example.com', model: 'one', contextWindow: 32768, maxTokens: 4096, hasKey: false, enabled: true,

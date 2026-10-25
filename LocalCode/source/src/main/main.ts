@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, screen, shell, utilityProcess, type UtilityProcess } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, protocol, safeStorage, screen, shell, utilityProcess, type UtilityProcess } from 'electron';
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import path from 'node:path';
@@ -162,7 +162,10 @@ async function stopRunOnce(sessionId: string) {
 }
 
 const schemas: Record<string, z.ZodType> = {
-  bootstrap: z.undefined(), pickProject: z.undefined(), createSession: id, openSession: id,
+  bootstrap: z.undefined(), pickProject: z.undefined(), createSession: id.nullish(), openSession: id,
+  moveSession: z.object({ sessionId: id, projectId: id }).strict(),
+  setProjectPinned: z.object({ projectId: id, pinned: z.boolean() }).strict(),
+  setSidebar: z.object({ pinnedCollapsed: z.boolean(), projectsCollapsed: z.boolean(), recentCollapsed: z.boolean(), collapsedProjects: z.array(id).max(1000) }).partial().strict(),
   renameSession: z.object({ sessionId: id, title: z.string().trim().min(1).max(100) }).strict(),
   send: z.object({ sessionId: id, prompt: z.string().trim().min(1).max(30000), providerId, modelId: z.string().min(1).max(200).optional() }).strict(), stop: id,
   approve: z.object({ runId: id, approvalId: z.string().min(1).max(200), allow: z.boolean() }).strict(),
@@ -170,6 +173,7 @@ const schemas: Record<string, z.ZodType> = {
   artifactInfo: z.object({ projectId: id, path: z.string().min(1).max(4096), inputKind: z.enum(['path', 'reference']).optional() }).strict(),
   artifactAction: z.object({ projectId: id, path: z.string().min(1).max(4096), action: z.enum(['open', 'choose-app', 'reveal', 'copy-path']), inputKind: z.enum(['path', 'reference']).optional() }).strict(),
   openExternal: z.string().min(1).max(4096),
+  copyText: z.string().max(2 * 1024 * 1024),
   changes: id, undo: z.object({ sessionId: id, path: relPath }).strict(),
   previewCheckpoint: z.object({ sessionId: id, path: relPath }).strict(),
   checkpoint: z.object({ sessionId: id, path: relPath, expectedHash: z.string().regex(/^[a-f0-9]{64}$/), expectedRecordHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
@@ -187,8 +191,15 @@ async function invoke(method: string, arg: any) {
     case 'bootstrap': { const currentHealth = await health(); await eventQueue; return { projects: store.projects(), sessions: store.sessions(), settings: store.settings(), health: currentHealth, version: app.getVersion() }; }
     case 'pickProject': { const choice = await dialog.showOpenDialog(window!, { title: tr('选择编程项目'), properties: ['openDirectory'] }); if (choice.canceled || !choice.filePaths[0]) return null; const p = await store.addProject(choice.filePaths[0]); emit({ type: 'state_changed' }); return p; }
     case 'createSession': return store.createSession(arg);
+    case 'moveSession': {
+      if (runs.has(arg.sessionId) || starting.has(arg.sessionId) || recovering.has(arg.sessionId)) throw new Error('请等待任务结束后再移入项目。');
+      const moved = await store.moveSession(arg.sessionId, arg.projectId); emit({ type: 'state_changed' }); return moved;
+    }
+    case 'setProjectPinned': { const project = await store.setProjectPinned(arg.projectId, arg.pinned); emit({ type: 'state_changed' }); return project; }
+    case 'setSidebar': { const sidebar = await store.setSidebar(arg); emit({ type: 'state_changed' }); return sidebar; }
     case 'openSession': await eventQueue; return structuredClone(store.session(arg));
     case 'renameSession': return store.renameSession(arg.sessionId, arg.title);
+    case 'copyText': await clipboard.writeText(arg); return;
     case 'send': {
       if (changingFiles) throw new Error(tr('正在保存文件修改记录，请稍后再开始任务。'));
       if (quitting || runs.has(arg.sessionId) || starting.has(arg.sessionId)) throw new Error(tr('此会话已有任务运行中，请先停止或等待完成。'));
@@ -215,7 +226,7 @@ async function invoke(method: string, arg: any) {
       active = { runId: session.runId!, sessionId: session.id, apiKey: provider.kind !== 'ollama' ? secret.apiKey : undefined, child, requestGroup };
       runs.set(session.id, active);
       if (quitting || startup.cancelled) throw new Error(tr('启动已取消，任务未执行。'));
-      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, projectPath: store.project(session.projectId).path, dataDir, piFile: session.piFile, provider: secret, prompt: arg.prompt, locale });
+      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, projectPath: session.projectId ? store.project(session.projectId).path : '', dataDir, piFile: session.piFile, provider: secret, prompt: arg.prompt, locale });
       emit({ type: 'state_changed' }); return { runId: session.runId };
       } catch (error) {
         if (active) await processEvent({ type: 'settled', runId: active.runId, sessionId: active.sessionId, status: quitting || startup.cancelled ? 'interrupted' : 'failed', error: (error as Error).message });
@@ -233,11 +244,11 @@ async function invoke(method: string, arg: any) {
     case 'artifactInfo': return artifacts.info(store.project(arg.projectId).path, arg.path, arg.inputKind);
     case 'artifactAction': return artifacts.action(store.project(arg.projectId).path, arg.path, arg.action, arg.inputKind);
     case 'openExternal': await shell.openExternal(externalBrowserUrl(arg)); return;
-    case 'changes': store.session(arg); return getChanges(dataDir, arg);
-    case 'previewCheckpoint': assertChangesIdle(); store.session(arg.sessionId); return previewChangeCheckpoint(dataDir, arg.sessionId, arg.path);
+    case 'changes': return store.session(arg).projectId ? getChanges(dataDir, arg) : [];
+    case 'previewCheckpoint': assertChangesIdle(); if (!store.session(arg.sessionId).projectId) throw new Error('此任务未指定工作区，没有可操作的项目文件。'); return previewChangeCheckpoint(dataDir, arg.sessionId, arg.path);
     case 'undo':
     case 'checkpoint': {
-      assertChangesIdle(); store.session(arg.sessionId);
+      assertChangesIdle(); if (!store.session(arg.sessionId).projectId) throw new Error('此任务未指定工作区，没有可操作的项目文件。');
       // Reserve synchronously, before any await, so a new send cannot race this operation.
       changingFiles = true;
       try {

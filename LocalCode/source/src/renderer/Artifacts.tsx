@@ -1,6 +1,6 @@
 import { t, useLocale, errorText } from './i18n';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Code2, Copy, ExternalLink, FileCode2, FolderOpen, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, RefreshCw, X } from 'lucide-react';
+import { Code2, Copy, ExternalLink, File, FileCode2, FolderOpen, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, RefreshCw, X } from 'lucide-react';
 import type { ArtifactAction, ArtifactInfo, ArtifactInputKind } from '../shared/artifacts';
 import type { FileView } from '../shared/contracts';
 
@@ -76,7 +76,7 @@ export function ExternalWebLink({ href, children }: { href: string; children: Re
 export function ArtifactLink({ path, inputKind = 'path', children, className = '', label }: { path: string; inputKind?: ArtifactInputKind; children: React.ReactNode; className?: string; label?: string }) {
   const controller = useContext(ArtifactContext);
   if (!controller) return <span>{children}</span>;
-  return <a href={path} className={`artifact-link ${className}`} title={path} aria-label={label} onClick={event => { event.preventDefault(); void controller.open(path, 'preview', inputKind); }} onContextMenu={event => void controller.showMenu(event, path, inputKind)} onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') void controller.showMenu(event, path, inputKind); }}>{children}</a>;
+  return <a href={path} className={`artifact-link ${className}`} title={path} aria-label={label} onClick={event => { event.preventDefault(); void controller.open(path, 'preview', inputKind); }} onContextMenu={event => void controller.showMenu(event, path, inputKind)} onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') void controller.showMenu(event, path, inputKind); }}><File className="artifact-link-icon" size={14} aria-hidden="true" />{children}</a>;
 }
 
 export function ArtifactPanel({ controller: c }: { controller: ArtifactController }) {

@@ -28,7 +28,7 @@ describe('interaction language policy', () => {
     expect(responseLanguagePolicy('invalid' as AppLocale)).toBe(responseLanguagePolicy('zh-CN'));
   });
 
-  it('sends the current language to the real SDK on every resumed turn without rewriting user requests', async () => {
+  it.each([false, true])('sends the current language to the real SDK on every resumed turn without rewriting user requests (projectless=%s)', async projectless => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'localcode-language-')); temporary.push(root);
     const project = path.join(root, 'project'), data = path.join(root, 'data');
     await mkdir(project); await mkdir(data);
@@ -46,7 +46,7 @@ describe('interaction language policy', () => {
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture address');
     const events: AgentEvent[] = [];
     const engine = new AgentEngine(event => events.push(event));
-    const base: RunRequest = { type: 'run', runId: 'language-0', sessionId: 'language-session', projectPath: await realpath(project), dataDir: data, prompt: '请介绍这个项目',
+    const base: RunRequest = { type: 'run', runId: 'language-0', sessionId: 'language-session', projectPath: projectless ? '' : await realpath(project), dataDir: data, prompt: '请介绍这个项目',
       provider: { id: 'mock', name: 'Mock', kind: 'openai', baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'mock-model', contextWindow: 8192, maxTokens: 1024, hasKey: true, apiKey: 'language-fixture-key' } };
     const prompts = ['请介绍这个项目', '请继续介绍', '请用英文回复这个中文问题', 'Explain the code'];
     let piFile: string | undefined;

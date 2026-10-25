@@ -1,0 +1,46 @@
+.task-sidebar-content { flex: 1; min-height: 0; overflow: auto; padding: 0 5px 12px; }
+.task-sidebar-content > section + section { margin-top: 17px; }
+.task-section-label { padding: 0 6px 4px 10px; }
+.section-toggle { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0; text-align: left; font-size: var(--text-label); color: var(--muted); }
+.section-toggle:hover { color: var(--text); }
+.project-row { display: flex; align-items: center; min-width: 0; gap: 2px; border-radius: 8px; }
+.project-row:hover { background: var(--hover); }
+.project-chevron { width: 18px; height: 28px; color: var(--faint); }
+.task-sidebar-content .project-item { flex: 1; min-width: 0; width: auto; padding: 8px 2px; margin: 0; background: transparent; }
+.task-sidebar-content .project-item > svg:last-child { opacity: 1; margin: 0; }
+.project-more { opacity: 0; width: 25px; margin-right: 3px; }
+.project-row:hover .project-more, .project-row:focus-within .project-more { opacity: 1; }
+.project-tasks { margin-left: 18px; }
+.task-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; margin: 2px 0; }
+.task-row:hover { background: var(--hover); }
+.task-row.active { background: var(--selected); }
+.project-session-button { min-width: 0; display: flex; align-items: center; gap: 8px; flex: 1; padding: 8px 4px 8px 19px; text-align: left; font-size: .8125rem; }
+.project-session-button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-task-row:hover .session-more, .project-task-row:focus-within .session-more, .project-task-row.active .session-more { opacity: 1; }
+.show-project-tasks { padding: 7px 19px; color: var(--faint); font-size: .8125rem; }
+.task-sidebar-content .session-list { padding: 0 2px; overflow: visible; }
+.task-sidebar-content .session-button { padding-left: 12px; }
+.sidebar-item-menu { position: fixed; z-index: 1100; width: 205px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.sidebar-item-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; text-align: left; border-radius: 7px; font-size: var(--text-label); }
+.sidebar-item-menu button:hover, .sidebar-item-menu button:focus-visible { background: var(--hover); }
+.composer-context { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; padding: 8px 12px; color: var(--muted); font-size: var(--text-label); }
+.workspace-picker-trigger { display: flex; align-items: center; gap: 7px; padding: 3px 0; min-width: 0; max-width: 65%; font-size: inherit; }
+.workspace-picker-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-picker-trigger:disabled { opacity: 1; cursor: default; }
+.workspace-picker-trigger:not(:disabled):hover { color: var(--text); }
+.computer-context { display: inline-flex; gap: 7px; align-items: center; }
+.workspace-picker-panel { position: fixed; z-index: 1050; display: flex; flex-direction: column; width: min(330px, calc(100vw - 16px)); max-height: min(480px, 68vh); padding: 8px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-size: var(--text-body); }
+.workspace-search { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.workspace-search input { min-width: 0; width: 100%; border: 0; padding: 4px 0; color: var(--text); background: transparent; font-size: var(--text-body); }
+.workspace-options { overflow: auto; min-height: 0; padding: 5px 0; }
+.workspace-options button, .move-project-options button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px; border-radius: 9px; text-align: left; font-size: var(--text-body); }
+.workspace-options button > span, .move-project-options button > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-options button:hover, .workspace-options button[aria-selected='true'], .move-project-options button:hover { background: var(--hover); }
+.workspace-create { display: flex; align-items: center; gap: 9px; width: 100%; border-top: 1px solid var(--border); padding: 12px 10px 7px; text-align: left; font-size: var(--text-body); color: var(--muted); }
+.workspace-create:hover { color: var(--text); }
+.move-task-dialog { display: flex; flex-direction: column; width: min(420px, calc(100vw - 32px)); max-height: 80vh; padding: 14px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }
+.move-task-dialog header { display: flex; align-items: center; justify-content: space-between; }
+.move-task-dialog h2 { font-size: 1rem; margin: 0; }
+.move-task-dialog > p { margin: 8px 0 10px; color: var(--muted); font-size: var(--text-label); overflow-wrap: anywhere; }
+.move-project-options { min-height: 0; overflow: auto; padding: 6px 0; }
+.move-project-options > p { color: var(--muted); padding: 8px; font-size: var(--text-label); }

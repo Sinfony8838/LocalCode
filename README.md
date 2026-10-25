@@ -6,6 +6,8 @@ A local-first coding desktop for Windows: Electron + React + TypeScript, a separ
 
 This repository contains the application architecture, source, tests, dependency lockfile, and bootstrap scripts.
 
+Tasks can start without a project folder. Choose a workspace above the composer when needed, or move an existing projectless task into a project while keeping its conversation. Projects support pinning and collapsible task groups; sidebar preferences persist. File names open inline, and copy is available once per final answer. See [tasks and projects](docs/TASKS_AND_PROJECTS.md).
+
 Conversation text uses the system sans-serif font, with a 14 px default size, 24 px line height, and 12 px paragraph spacing. Font size remains adjustable in Settings → Appearance. Stop status and elapsed time share one line; completed runs show elapsed time before the final reply. File cards show three files initially and expand to reveal the rest. Routine coverage notes are hidden, while actual statistics errors remain visible.
 
 > **Release hold:** the known application-data isolation issue remains unresolved. Previous validation artifacts are not recommended releases; passing build or onboarding checks does not establish release readiness.
@@ -41,14 +43,14 @@ Opening LocalCode does not install your project's language runtimes or build too
 
 ### Prebuilt portable desktop: extract and open
 
-A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.14-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
+A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.19-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
 
 1. Double-click the extracted **`Start.cmd`**. No build tools or model downloads are needed to open the desktop.
 2. Choose your connection in Settings:
    - **Already have Ollama?** Explicitly select the existing local service and choose one of its installed models. LocalCode will not install, replace or stop it.
    - **Use your own API?** Configure that provider. Saving configuration does not make a model request; an explicit connection test or task may use quota.
    - **Want LocalCode's managed local model?** Close LocalCode, then double-click **`Install-LocalModel.cmd`**. This downloads checksum-pinned Ollama 0.40.10 and `qwen3.5:9b-q4_K_M`, with the `localcode-agent` alias at 8192-token context. It does **not** download Node.js or rebuild the desktop. Allow several GB of downloads and preferably **25 GiB free**; check the hardware guidance below before choosing the 9B model.
-3. Open a project folder and try a small task. Terminal commands require explicit approval.
+3. Start a conversation directly, or select a project folder for a coding task. Projectless conversations have no file or terminal tools; project terminal commands require explicit approval.
 
 Opening the desktop never silently starts or reuses an Ollama service. For a managed installation after reboot, use the explicit local-service start action in Settings (or `Ollama\Start.cmd`). Closing LocalCode leaves an already running managed Ollama available; idle models unload after five minutes. `Ollama\Stop.cmd` stops only the managed process whose executable path matches this installation.
 

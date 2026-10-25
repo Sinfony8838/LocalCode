@@ -5,7 +5,9 @@ export type Theme = 'light' | 'dark';
 export const DEFAULT_FONT_SIZE = 14;
 export const MIN_FONT_SIZE = 12;
 export const MAX_FONT_SIZE = 20;
-export interface Project { id: string; name: string; path: string; createdAt: string }
+export interface Project { id: string; name: string; path: string; createdAt: string; pinned?: boolean }
+export interface SidebarPreferences { pinnedCollapsed: boolean; projectsCollapsed: boolean; recentCollapsed: boolean; collapsedProjects: string[] }
+export const DEFAULT_SIDEBAR: SidebarPreferences = { pinnedCollapsed: false, projectsCollapsed: false, recentCollapsed: false, collapsedProjects: [] };
 export interface MessagePart { index: number; type: 'text' | 'thinking'; text: string; startedAt: string; endedAt?: string; state: 'streaming' | 'completed' | 'interrupted' }
 export interface RunProgress { phase: 'waiting' | 'thinking' | 'output' | 'tool' | 'queued' | 'retry'; since: string; retryAt?: number; attempt?: number }
 export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; runId?: string; partial?: boolean; parts?: MessagePart[] }
@@ -13,11 +15,11 @@ export interface RunFileChange { path: string; kind: 'created' | 'modified' | 'd
 export interface RunSummary { runId: string; startedAt: string; endedAt?: string; durationMs?: number; status: 'running' | 'completed' | 'failed' | 'interrupted'; finalMessageId?: string; changes: RunFileChange[]; changeScope: 'workspace_snapshot' | 'file_tools'; coverageNote?: string; changesError?: string }
 export interface ToolRecord { id: string; runId: string; name: string; args: unknown; result?: string; isError?: boolean; status: 'running' | 'completed' | 'failed'; createdAt: string }
 export interface Approval { id: string; runId: string; sessionId: string; command: string; cwd: string }
-export interface SessionView { id: string; projectId: string; title: string; createdAt: string; updatedAt: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress }
+export interface SessionView { id: string; projectId: string | null; title: string; createdAt: string; updatedAt: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress }
 export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean }
 export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; ollamaMode?: 'managed' | 'existing' }
 export interface ProviderSecret extends ProviderConfig { apiKey: string }
-export interface AppSettings { theme: Theme; fontSize: number; locale: AppLocale; defaultProviderId: string; providers: ProviderConfig[] }
+export interface AppSettings { theme: Theme; fontSize: number; locale: AppLocale; defaultProviderId: string; providers: ProviderConfig[]; sidebar?: SidebarPreferences }
 export interface LocalModelProbe { baseUrl: string; model: string; contextWindow: number; ollamaMode?: 'managed' | 'existing' }
 export interface ModelHealth { status?: 'ready' | 'offline' | 'missing_model' | 'invalid_response' | 'invalid_config' | 'unverified_service' | 'missing_runtime'; installedModels?: string[]; online: boolean; modelAvailable: boolean; model: string; contextWindow: number; version?: string; gpuPercent?: number; message?: string }
 export interface FileEntry { path: string; name: string; directory: boolean }
@@ -53,7 +55,10 @@ export interface LocalCodeApi {
  openExternal(url: string): Promise<void>;
  bootstrap(): Promise<Bootstrap>;
  pickProject(): Promise<Project | null>;
- createSession(projectId: string): Promise<SessionView>;
+ createSession(projectId?: string | null): Promise<SessionView>;
+ moveSession(input: {sessionId: string; projectId: string}): Promise<SessionView>;
+ setProjectPinned(input: {projectId: string; pinned: boolean}): Promise<Project>;
+ setSidebar(input: Partial<SidebarPreferences>): Promise<SidebarPreferences>;
  openSession(sessionId: string): Promise<SessionView>;
  renameSession(input: {sessionId: string; title: string}): Promise<SessionView>;
  send(input: {sessionId: string; prompt: string; providerId: string; modelId?: string}): Promise<{runId: string}>;
@@ -63,6 +68,7 @@ export interface LocalCodeApi {
  readFile(input: {projectId: string; path: string}): Promise<FileView>;
  artifactInfo(input: {projectId: string; path: string; inputKind?: ArtifactInputKind}): Promise<ArtifactInfo>;
  artifactAction(input: {projectId: string; path: string; action: ArtifactAction; inputKind?: ArtifactInputKind}): Promise<void>;
+ copyText(text: string): Promise<void>;
  changes(sessionId: string): Promise<ChangeView[]>;
  previewCheckpoint(input: {sessionId: string; path: string}): Promise<ChangeCheckpointPreview>;
  checkpoint(input: {sessionId: string; path: string; expectedHash: string; expectedRecordHash: string}): Promise<void>;

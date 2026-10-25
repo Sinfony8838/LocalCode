@@ -8,12 +8,13 @@ import { diffLines } from 'diff';
 import PetControls from './PetControls';
 import ModelSettings from './ModelSettings';
 import ModelPicker from './ModelPicker';
+import TaskSidebar, { MoveTaskDialog, ProjectPicker } from './TaskNavigation';
 import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
 import RunSummary, { RunTiming } from './RunSummary';
 import ChangeCheckpointDialog from './ChangeCheckpointDialog';
 import { reduceAgentEvent } from '../shared/session-events';
 import { providerModels } from '../shared/providers';
-import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE } from '../shared/contracts';
+import { DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_SIDEBAR } from '../shared/contracts';
 import {
   AlertCircle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown,
   ChevronRight, Circle, Clipboard, Code2, Cpu, FileCode2, FilePlus2, Files, Folder,
@@ -25,7 +26,7 @@ import {
 } from 'lucide-react';
 import type {
   MessagePart, RunProgress, AgentEvent, AppSettings, Bootstrap, ChangeCheckpointPreview, ChangeView, ChatMessage, FileEntry, FileView, RunSummary as RunSummaryRecord,
-  ModelHealth, Project, ProviderConfig, RunStatus, SessionView, Theme, ToolRecord,
+  ModelHealth, Project, ProviderConfig, RunStatus, SessionView, Theme, ToolRecord, SidebarPreferences,
 } from '../shared/contracts';
 
 const STATUS_LABELS: Record<RunStatus, string> = {
@@ -80,6 +81,8 @@ export default function App() {
   const [healthPending, setHealthPending] = useState(false);
   const [renameId, setRenameId] = useState('');
   const [renameTitle, setRenameTitle] = useState('');
+  const [moveSessionId, setMoveSessionId] = useState('');
+  const navigationRevision = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const activeSessionRef = useRef(activeSessionId);
   const activeProjectRef = useRef(activeProjectId);
@@ -97,12 +100,12 @@ export default function App() {
   const sessions = boot?.sessions || [];
   const activeSession = sessions.find(session => session.id === activeSessionId);
   const project = boot?.projects.find(item => item.id === activeProjectId);
-  const projectSessions = sortSessions(sessions.filter(session => session.projectId === activeProjectId));
+  const sidebarPreferences = boot?.settings.sidebar || DEFAULT_SIDEBAR;
   const backgroundSessions = sessions.filter(session => isBusy(session.status) && session.id !== activeSessionId);
   const busySession = backgroundSessions[0];
   const busy = isBusy(activeSession?.status);
   const changesBusy = sessions.some(session => isBusy(session.status)) || Object.values(pendingActions).some(Boolean) || checkpointPending;
-  const draftKey = activeSessionId || `project:${activeProjectId || 'none'}`;
+  const draftKey = activeSessionId || 'new-task';
   const actionPending = Boolean(pendingActions[draftKey]);
   const approvalPending = Boolean(pendingApprovals[activeSessionId]);
   const stopPending = Boolean(pendingStops[activeSessionId]);
@@ -154,7 +157,7 @@ export default function App() {
       setLocale(state.settings.locale);
       setBoot(state);
       const latest = sortSessions(state.sessions)[0];
-      setActiveProjectId(latest?.projectId || state.projects[0]?.id || '');
+      setActiveProjectId(latest?.projectId || '');
       setActiveSessionId(latest?.id || '');
       setModelId(latest?.modelId || ''); setProviderId(latest?.providerId || state.settings.defaultProviderId || state.settings.providers[0]?.id || '');
     }).catch(failure => !disposed && setError(errorText(failure))).finally(() => !disposed && setLoading(false));
@@ -188,7 +191,7 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     setFileView(null);
-    if (!activeProjectId || !window.localcode) { setFiles([]); return; }
+    if (!activeProjectId || !window.localcode) { setFiles([]); setFileLoading(false); return; }
     setFileLoading(true);
     window.localcode.listFiles({ projectId: activeProjectId, directory }).then(entries => !disposed && setFiles(entries))
       .catch(failure => !disposed && setError(errorText(failure))).finally(() => !disposed && setFileLoading(false));
@@ -226,27 +229,35 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const openProject = async () => {
+  const moveTask = async (sessionId: string, projectId: string) => {
+    try {
+      const moved = await window.localcode.moveSession({ sessionId, projectId });
+      putSession(moved); setMoveSessionId('');
+      if (activeSessionRef.current === sessionId) { navigationRevision.current++; setActiveProjectId(projectId); setDirectory(''); artifacts.close(); }
+    } catch (failure) { setError(errorText(failure)); }
+  };
+
+  const openProject = async (moveId?: string) => {
+    const navigation = ++navigationRevision.current;
     try {
       const next = await window.localcode.pickProject();
       if (!next) return;
-      const state = await refresh();
-      setActiveProjectId(next.id); setDirectory(''); setFileView(null);
-      const latest = sortSessions((state?.sessions || []).filter(session => session.projectId === next.id))[0];
-      setActiveSessionId(latest?.id || '');
-      setModelId(latest?.modelId || ''); setProviderId(latest?.providerId || state?.settings.defaultProviderId || providerId);
+      await refresh();
+      if (moveId) await moveTask(moveId, next.id);
+      else if (navigation === navigationRevision.current) selectProject(next.id);
       textareaRef.current?.focus();
     } catch (failure) { setError(errorText(failure)); }
   };
 
   const selectProject = (id: string) => {
+    navigationRevision.current++;
     setActiveProjectId(id); setDirectory(''); setFileView(null);
-    const latest = sortSessions(sessions.filter(session => session.projectId === id))[0];
-    setActiveSessionId(latest?.id || ''); setModelId(latest?.modelId || ''); setProviderId(latest?.providerId || boot?.settings.defaultProviderId || '');
+    setActiveSessionId(''); setNotice(''); artifacts.close();
   };
 
   const openSession = async (session: SessionView) => {
-    setActiveProjectId(session.projectId); setActiveSessionId(session.id); setProviderId(session.providerId); setModelId(session.modelId || ''); setDirectory('');
+    navigationRevision.current++;
+    setActiveProjectId(session.projectId || ''); setActiveSessionId(session.id); setProviderId(session.providerId); setModelId(session.modelId || ''); setDirectory('');
     try {
       const revision = eventRevision.current;
       const current = await window.localcode.openSession(session.id);
@@ -254,26 +265,43 @@ export default function App() {
     } catch (failure) { setError(errorText(failure)); }
   };
 
-  const newSession = async () => {
-    if (!activeProjectId) { await openProject(); return; }
-    try {
-      const created = await window.localcode.createSession(activeProjectId);
-      putSession(created); setActiveSessionId(created.id); setProviderId(created.providerId); setModelId(created.modelId || ''); setAtBottom(true);
-      textareaRef.current?.focus();
-    } catch (failure) { setError(errorText(failure)); }
+  const goHome = () => {
+    navigationRevision.current++;
+    // Home is navigation only. Keep history, per-session drafts and active runs intact.
+    setActiveSessionId(''); setNotice(''); setAtBottom(true);
+    setInspectorOpen(false); artifacts.close(); artifacts.closeMenu();
+    textareaRef.current?.focus();
+  };
+
+  const newSession = () => {
+    goHome(); setActiveProjectId(''); setDirectory(''); setFileView(null);
+  };
+  const chooseWorkspace = (projectId: string | null) => {
+    if (activeSession) { if (projectId && !activeSession.projectId) void moveTask(activeSession.id, projectId); }
+    else selectProject(projectId || '');
+  };
+  const updateSidebar = async (patch: Partial<SidebarPreferences>) => {
+    setBoot(previous => previous ? { ...previous, settings: { ...previous.settings, sidebar: { ...DEFAULT_SIDEBAR, ...previous.settings.sidebar, ...patch } } } : previous);
+    try { await window.localcode.setSidebar(patch); }
+    catch (failure) { setError(errorText(failure)); await refresh(); }
+  };
+  const togglePinned = async (project: Project) => {
+    try { const updated = await window.localcode.setProjectPinned({ projectId: project.id, pinned: !project.pinned }); setBoot(previous => previous ? { ...previous, projects: previous.projects.map(p => p.id === updated.id ? updated : p) } : previous); }
+    catch (failure) { setError(errorText(failure)); }
   };
 
   const send = async (event?: React.FormEvent) => {
     event?.preventDefault();
     const prompt = draft.trim();
-    if (!prompt || !activeProjectId || busy || sendLocks.current.has(draftKey) || !provider) return;
+    if (!prompt || busy || sendLocks.current.has(draftKey) || !provider) return;
+    const navigation = navigationRevision.current;
     const oldDraftKey = draftKey;
     let targetId = activeSessionId;
     sendLocks.current.add(oldDraftKey);
     setPendingActions(previous => ({ ...previous, [oldDraftKey]: true })); setError(''); setNotice(''); setAtBottom(true);
     try {
       let session = activeSession;
-      if (!session) { session = await window.localcode.createSession(activeProjectId); putSession(session); if (activeProjectRef.current === activeProjectId && !activeSessionRef.current) setActiveSessionId(session.id); }
+      if (!session) { session = await window.localcode.createSession(activeProjectId || null); putSession(session); if (navigation === navigationRevision.current && activeProjectRef.current === activeProjectId && !activeSessionRef.current) setActiveSessionId(session.id); }
       targetId = session.id;
       sendLocks.current.add(targetId);
       setPendingActions(previous => ({ ...previous, [targetId]: true }));
@@ -373,8 +401,8 @@ export default function App() {
 
   return <ArtifactContext.Provider value={artifacts}><div className={`app-shell ${inspectorOpen || artifactOpen ? '' : 'inspector-hidden'} ${sidebarOpen ? '' : 'sidebar-hidden'} ${artifactOpen ? 'artifact-open' : ''}`}>
     <nav className="activity-rail" aria-label={t("工作区导航")}>
-      <button className="rail-button active" title={t("新建任务")} aria-label={t("开始新任务")} onClick={() => void newSession()}><Home size={19} /></button>
-      <button className="rail-button" title={sidebarOpen ? t("收起侧边栏") : t("展开侧边栏")} aria-label={sidebarOpen ? t("收起侧边栏") : t("展开侧边栏")} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
+      <button className={`rail-button ${!activeSessionId ? 'active' : ''}`} title={t("返回首页")} aria-label={t("返回首页")} aria-current={!activeSessionId ? 'page' : undefined} onClick={goHome}><Home size={19} /></button>
+      <button className="rail-button" title={sidebarOpen ? t('收起侧边栏') : t('展开侧边栏')} aria-label={sidebarOpen ? t('收起侧边栏') : t('展开侧边栏')} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(value => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
       <button className="rail-button" title={t("打开项目文件夹")} aria-label={t("添加项目")} onClick={() => void openProject()}><FolderOpen size={19} /></button>
       <div className="rail-divider" />
       <button className={`rail-button ${inspectorOpen ? 'active' : ''}`} title={t("文件与修改")} aria-label={t("切换文件与修改面板")} aria-pressed={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}><GitCompareArrows size={19} /></button>
@@ -385,25 +413,8 @@ export default function App() {
     <aside className="sidebar">
       <div className="sidebar-brand drag-region"><span>LocalCode</span><ChevronDown size={13} /><button className="icon-button" title={t("打开项目文件夹")} aria-label={t("打开项目文件夹")} onClick={() => void openProject()}><FolderPlus size={16} /></button></div>
       <div className="sidebar-actions"><button className="new-task-button" onClick={() => void newSession()}><SquarePen size={15} /><span>{t("新建任务")}</span></button></div>
-      <div className="section-label"><span>{t("项目")}</span><button className="icon-button" title={t("打开项目文件夹")} aria-label={t("打开项目文件夹")} onClick={() => void openProject()}><FolderPlus size={15} /></button></div>
-      <nav className="project-list" aria-label={t("项目列表")}>
-        {boot?.projects.map(item => <button className={`project-item ${item.id === activeProjectId ? 'active' : ''}`} key={item.id} onClick={() => selectProject(item.id)} title={item.path}>
-          {item.id === activeProjectId ? <FolderOpen size={16} /> : <Folder size={16} />}<span>{item.name}</span><ChevronRight size={13} />
-        </button>)}
-        {!boot?.projects.length && <button className="add-first-project" onClick={() => void openProject()}><FolderPlus size={17} />{t("添加本地项目")}</button>}
-      </nav>
-      <div className="section-label history-label"><span>{t("会话记录")}</span><History size={13} /></div>
-      <nav className="session-list" aria-label={t("会话记录")}>
-        {projectSessions.map(session => <div key={session.id} className={`session-row ${session.id === activeSessionId ? 'active' : ''}`}>
-          <button className="session-button" onClick={() => void openSession(session)} title={sessionTitle(session)}>
-            <span>{sessionTitle(session)}</span>
-            {isBusy(session.status) && <LoaderCircle size={13} className={session.status === 'running' ? 'spin' : 'approval-dot'} />}
-          </button>
-          <button className="session-more icon-button" title={t("重命名会话")} aria-label={t("重命名 {title}", { title: sessionTitle(session) })} onClick={() => { setRenameId(session.id); setRenameTitle(session.title); }}><MoreHorizontal size={14} /></button>
-        </div>)}
-        {!projectSessions.length && <p className="sidebar-empty">{project ? t("从一个小任务开始。\n对话会保存在这台电脑上。") : t("打开项目后，\n在这里继续你的工作。")}</p>}
-      </nav>
-      {busySession && busySession.id !== activeSessionId && <button className="background-task" onClick={() => void openSession(busySession)}><LoaderCircle size={14} className="spin" /><span>{busySession.status === 'awaiting_approval' ? t("有任务等待确认") : t("有任务正在运行")}</span><ArrowUpRight size={13} /></button>}
+      <TaskSidebar projects={boot?.projects || []} sessions={sessions} activeProjectId={activeProjectId} activeSessionId={activeSessionId} preferences={sidebarPreferences} onProject={selectProject} onSession={session => void openSession(session)} onAddProject={() => void openProject()} onRename={session => { setRenameId(session.id); setRenameTitle(session.title); }} onMove={session => setMoveSessionId(session.id)} onPin={project => void togglePinned(project)} onPreferences={patch => void updateSidebar(patch)} />
+      {busySession && busySession.id !== activeSessionId && <button className="background-task" onClick={() => void openSession(busySession)}><LoaderCircle size={14} className="spin" /><span>{busySession.status === 'awaiting_approval' ? t('有任务等待确认') : t('有任务正在运行')}</span><ArrowUpRight size={13} /></button>}
       <div className="sidebar-footer">
         <div className="local-health" title={cloudSelected ? t("云端模型不依赖本地 Ollama；连通性请在设置中手动测试。") : boot?.health.message ? t(boot.health.message) : undefined}><span className={`status-dot ${cloudSelected ? provider?.hasKey ? 'online' : 'offline' : boot?.health.online && boot?.health.modelAvailable ? 'online' : 'offline'}`} /><span>{cloudSelected ? t("云端模式 · 无需 Ollama") : boot?.health.online ? boot.health.modelAvailable ? boot.health.gpuPercent === 0 ? t("CPU 运行 · 较慢") : t("本地模型已就绪") : t("模型尚未就绪") : t("Ollama 未连接")}</span><button className="icon-button" title={t("刷新连接")} aria-label={t("刷新模型连接")} onClick={() => void checkHealth()} disabled={healthPending}><RefreshCw size={13} className={healthPending ? 'spin' : ''} /></button></div>
       </div>
@@ -411,15 +422,15 @@ export default function App() {
 
     <main className="workspace">
       <header className="workspace-header drag-region">
-        <div className="workspace-heading"><Folder size={16} /><h1 title={activeSession ? sessionTitle(activeSession) : project?.path}>{activeSession ? sessionTitle(activeSession) : project?.name || t("新任务")}</h1></div>
-        <div className="header-actions no-drag"><span className={`run-status ${activeSession?.status || 'idle'}`}><span className="status-dot" />{t(STATUS_LABELS[activeSession?.status || 'idle'])}</span><button className="icon-button" title={inspectorOpen ? t("收起文件面板") : t("打开文件面板")} aria-label={inspectorOpen ? t("收起文件面板") : t("打开文件面板")} onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button></div>
+        <div className="workspace-heading"><Folder size={16} /><h1 title={activeSession?.title || project?.path}>{activeSession ? sessionTitle(activeSession) : t('首页')}</h1></div>
+        <div className="header-actions no-drag"><span className={`run-status ${activeSession?.status || 'idle'}`}><span className="status-dot" />{t(STATUS_LABELS[activeSession?.status || 'idle'])}</span><button className="icon-button" title={inspectorOpen ? t('收起文件面板') : t('打开文件面板')} aria-label={inspectorOpen ? t('收起文件面板') : t('打开文件面板')} onClick={() => setInspectorOpen(value => !value)}>{inspectorOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</button></div>
       </header>
       {needsModelSetup && <section className="model-setup-banner" aria-label={t("模型配置指引")}><div><strong>{cloudSelected ? t("还差一步：配置 API Key") : t("开始前，选择一种模型方式")}</strong><p>{cloudSelected ? t("在模型设置中保存密钥，然后选择云端模型。无需安装 Ollama 或下载本地模型。") : cloudConfigured ? t("本地模型尚未就绪。你也可以直接在输入框下方选择已配置的云端模型，不受本地环境影响。") : t("本地新安装：运行 Install-LocalModel.cmd（便携版）或 Setup.cmd（源码版）。已有 Ollama：在设置中选择已有服务。云端 API：只需地址、模型名和密钥。")}</p></div><button className="secondary-button" onClick={() => setSettingsOpen(true)}><Settings2 size={15} />{t("配置模型与检查环境")}</button></section>}
       <div className="conversation" ref={scrollRef} onScroll={event => { const element = event.currentTarget; setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 100); }}>
         {(!activeSession || !activeSession.messages.length) ? <div className="welcome">
-          <h2>{project ? t("接下来，做点什么？") : t("从一个想法开始")}</h2>
-          <p>{project ? t("和 LocalCode 一起工作") : t("选择本地项目，开始你的第一个任务")}</p>
-          {!project ? <button className="primary-button open-project-hero" onClick={() => void openProject()}><FolderOpen size={17} />{t("打开项目文件夹")}<ArrowUpRight size={15} /></button> : <>
+          <h2>{project ? t('你想在 {name} 中做些什么？', { name: project.name }) : t('我们从哪里开始？')}</h2>
+          <p>{project ? t('和 LocalCode 一起工作') : t('直接开始对话，也可以选择项目处理文件')}</p>
+          {project && <>
             <div className="project-location"><FolderOpen size={14} /><span title={project.path}>{project.path}</span></div>
             <div className="starter-grid">
               {[
@@ -430,7 +441,7 @@ export default function App() {
             </div>
           </>}
         </div> : <div className="message-list">
-          <ConversationTimeline messages={activeSession.messages} tools={activeSession.tools} runs={activeSession.runs || []} />
+          <ConversationTimeline messages={activeSession.messages} tools={activeSession.tools} runs={activeSession.runs || []} status={activeSession.status} />
           {busy && !activeSession.approval && <ProgressIndicator progress={activeSession.progress} />}
           {activeSession.error && <div className="inline-error"><AlertCircle size={16} /><div><strong>{t("任务遇到问题")}</strong><p>{t(activeSession.error)}</p></div></div>}
         </div>}
@@ -444,9 +455,10 @@ export default function App() {
           <pre className="approval-command">{activeSession.approval.command}</pre>
           <div className="approval-footer"><span>{t("确认仅对这一次命令生效")}</span><button className="secondary-button" disabled={approvalPending} onClick={() => void approve(false)}>{t("拒绝")}</button><button className="primary-button" disabled={approvalPending} onClick={() => void approve(true)}>{approvalPending ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t("允许执行")}</button></div>
         </div>}
-        <form className={`composer ${!project ? 'composer-disabled' : ''}`} onSubmit={event => void send(event)}>
-          <textarea ref={textareaRef} aria-label={t("任务输入")} value={draft} rows={2} placeholder={project ? t("和 LocalCode 一起工作") : t("先打开一个项目文件夹")} disabled={!project || actionPending} onChange={event => setDrafts(previous => ({ ...previous, [draftKey]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!busy) void send(); } }} />
-          <div className="composer-toolbar"><div className="composer-options"><button className="icon-button" type="button" title={t("打开项目文件夹")} aria-label={t("选择工作项目")} onClick={() => void openProject()}><Plus size={19} /></button><span className="composer-permission" title={t("文件修改自动执行；每条终端命令需单独确认")}><ShieldCheck size={13} /><span>{t("命令需确认")}</span></span></div><div className="composer-submit"><ModelPicker choices={choices} selected={choice} disabled={busy || actionPending || settingsOpen} onChange={next => { setProviderId(next.provider.id); setModelId(next.model.id); }} />{busy ? <button type="button" className="stop-button" aria-label={t("停止任务")} title={t("仅停止此会话的任务")} disabled={stopPending} onClick={() => void stop()}>{stopPending ? <LoaderCircle size={14} className="spin" /> : <Square size={12} fill="currentColor" />}</button> : <button className="send-button" type="submit" aria-label={t("发送任务")} disabled={!draft.trim() || !project || actionPending || !provider}>{actionPending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}</button>}</div></div>
+        <div className="composer-context"><ProjectPicker projects={boot?.projects || []} value={activeProjectId || null} disabled={busy || actionPending || Boolean(activeSession?.projectId)} onChange={chooseWorkspace} onCreate={() => void openProject(activeSession && !activeSession.projectId ? activeSession.id : undefined)} /><span className="computer-context"><Monitor size={14} />{t("此计算机")}</span></div>
+        <form className="composer" onSubmit={event => void send(event)}>
+          <textarea ref={textareaRef} aria-label={t("任务输入")} value={draft} rows={2} placeholder={project ? t('和 LocalCode 一起工作') : t('随心输入')} disabled={actionPending} onChange={event => setDrafts(previous => ({ ...previous, [draftKey]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!busy) void send(); } }} />
+          <div className="composer-toolbar"><div className="composer-options"><button className="icon-button" type="button" title={t("打开项目文件夹")} aria-label={t("添加工作项目")} onClick={() => void openProject()}><Plus size={19} /></button><span className="composer-permission" title={project ? t('文件修改自动执行；每条终端命令需单独确认') : t('未指定工作区，可直接对话')}>{project ? <ShieldCheck size={13} /> : <MessageSquare size={13} />}<span>{project ? t('命令需确认') : t('自由对话')}</span></span></div><div className="composer-submit"><ModelPicker choices={choices} selected={choice} disabled={busy || actionPending || settingsOpen} onChange={next => { setProviderId(next.provider.id); setModelId(next.model.id); }} />{busy ? <button type="button" className="stop-button" aria-label={t("停止任务")} title={t("仅停止此会话的任务")} disabled={stopPending} onClick={() => void stop()}>{stopPending ? <LoaderCircle size={14} className="spin" /> : <Square size={12} fill="currentColor" />}</button> : <button className="send-button" type="submit" aria-label={t("发送任务")} disabled={!draft.trim() || actionPending || !provider}>{actionPending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}</button>}</div></div>
         </form>
         <div className="composer-caption"><ShieldCheck size={11} /><span>{provider && provider.kind !== 'ollama' ? t("云端模型 · 仅在手动选择时调用") : t("本地模型 · 对话保存在这台电脑")} </span>{busySession && busySession.id !== activeSessionId && <button onClick={() => void openSession(busySession)}>{t("查看正在运行的任务")}</button>}</div>
       </div>
@@ -471,40 +483,50 @@ export default function App() {
     {settingsOpen && boot && <SettingsDialog settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onLocale={changeLocale} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
     {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} returnFocusTo={checkpointOpener.current} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>{t("重命名会话")}</h2><label className="field"><span>{t("会话名称")}</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>{t("取消")}</button><button className="primary-button" disabled={!renameTitle.trim()}>{t("保存")}</button></div></form></div>}
+    {moveSessionId && sessions.find(session => session.id === moveSessionId) && <MoveTaskDialog session={sessions.find(session => session.id === moveSessionId)!} projects={boot?.projects || []} onClose={() => setMoveSessionId('')} onMove={projectId => moveTask(moveSessionId, projectId)} onCreate={() => openProject(moveSessionId)} />}
     <ArtifactPanel controller={artifacts} />
     <ArtifactMenu controller={artifacts} />
   </div></ArtifactContext.Provider>;
 }
 
-function ConversationTimeline({ messages, tools, runs }: { messages: ChatMessage[]; tools: ToolRecord[]; runs: RunSummaryRecord[] }) {
-  const finalRuns = useMemo(() => new Map(runs.filter(run => run.status === 'completed' && run.finalMessageId && messages.some(message => message.id === run.finalMessageId)).map(run => [run.finalMessageId!, run])), [messages, runs]);
+function ConversationTimeline({ messages, tools, runs, status }: { messages: ChatMessage[]; tools: ToolRecord[]; runs: RunSummaryRecord[]; status: RunStatus }) {
+  const finalRuns = useMemo(() => new Map(runs.filter(run => run.status === 'completed' && run.finalMessageId && messages.some(message => message.id === run.finalMessageId && message.role === 'assistant' && !message.partial && message.text.trim())).map(run => [run.finalMessageId!, run])), [messages, runs]);
+  // Older histories have no per-run summaries. Only their last completed answer is copyable.
+  const legacyFinal = !runs.length && status === 'completed' ? [...messages].reverse().find(message => message.role === 'assistant' && !message.partial && message.text.trim()) : undefined;
   const items = useMemo(() => [
     ...messages.map(message => ({ type: 'message' as const, id: message.id, createdAt: message.createdAt, message })),
     ...tools.map(tool => ({ type: 'tool' as const, id: tool.id, createdAt: tool.createdAt, tool })),
     ...runs.filter(run => run.status !== 'running' && run.endedAt).map(run => ({ type: 'summary' as const, id: run.runId, createdAt: run.endedAt!, run })),
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [messages, tools, runs]);
   return <>{items.map(item => item.type === 'message'
-    ? <React.Fragment key={`message-${item.id}`}>{finalRuns.has(item.id) && <RunTiming run={finalRuns.get(item.id)!} />}<Message message={item.message} hideCopy={!!finalRuns.get(item.id)?.changes.length} /></React.Fragment>
-    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} /> : <React.Fragment key={`run-${item.id}`}><RunSummary run={item.run} showTiming={!item.run.finalMessageId || !finalRuns.has(item.run.finalMessageId)} />{!!item.run.changes.length && item.run.finalMessageId && finalRuns.has(item.run.finalMessageId) && <MessageCopy message={messages.find(message => message.id === item.run.finalMessageId)!} />}</React.Fragment>)}</>;
+    ? <React.Fragment key={`message-${item.id}`}>{finalRuns.has(item.id) && <RunTiming run={finalRuns.get(item.id)!} />}<Message message={item.message} />{item.id === legacyFinal?.id && <div className="reply-actions"><MessageCopy message={item.message} /></div>}</React.Fragment>
+    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} /> : <React.Fragment key={`run-${item.id}`}><RunSummary run={item.run} showTiming={!item.run.finalMessageId || !finalRuns.has(item.run.finalMessageId)} />{item.run.finalMessageId && finalRuns.has(item.run.finalMessageId) && <div className="reply-actions" data-run-id={item.run.runId}><MessageCopy message={messages.find(message => message.id === item.run.finalMessageId)!} /></div>}</React.Fragment>)}</>;
 }
 
 function MessageCopy({ message }: { message: ChatMessage }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => { try { await navigator.clipboard.writeText(message.text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* Clipboard may be denied by the OS; leave content selectable. */ } };
-  return <button className="message-copy icon-button" aria-label={t("复制回答")} title={copied ? t("已复制") : t("复制回答")} onClick={() => void copy()}>{copied ? <Check size={13} /> : <Clipboard size={13} />}</button>;
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const copy = async () => {
+    if (timer.current) clearTimeout(timer.current);
+    try { await window.localcode.copyText(message.text); setState('copied'); }
+    catch { setState('failed'); }
+    timer.current = setTimeout(() => setState('idle'), 1500);
+  };
+  return <button className="message-copy icon-button" aria-label={t("复制回答")} title={state === 'copied' ? t('已复制') : state === 'failed' ? t('复制失败，请重试') : t('复制回答')} onClick={() => void copy()}>{state === 'copied' ? <Check size={13} /> : state === 'failed' ? <AlertCircle size={13} /> : <Clipboard size={13} />}<span className="sr-only" role="status">{state === 'copied' ? t('已复制') : state === 'failed' ? t('复制失败，请重试') : ''}</span></button>;
 }
 
-function Message({ message, hideCopy = false }: { message: ChatMessage; hideCopy?: boolean }) {
+function Message({ message }: { message: ChatMessage }) {
   if (message.role === 'user') return <div className="user-message"><div>{message.text}</div></div>;
   if (!message.text && !message.parts?.length) return null;
-  return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><Code2 size={15} /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}{!hideCopy && !message.partial && !!message.text && <MessageCopy message={message} />}</div></article>;
+  return <article className={`assistant-message ${message.partial ? 'streaming' : ''}`}><div className="assistant-avatar"><Code2 size={15} /></div><div className="assistant-body"><div className="assistant-label">LocalCode</div>{message.parts?.length ? message.parts.map(part => part.type === 'thinking' ? <ThinkingPart key={part.index} part={part} /> : <MarkdownText key={part.index} text={part.text} />) : <MarkdownText text={message.text} />}</div></article>;
 }
 
 function MarkdownText({ text }: { text: string }) {
   return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} urlTransform={markdownUrl} skipHtml components={{
     a: ({ children, href }) => href && (isFileReference(href) || !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(href)) ? <ArtifactLink path={href} inputKind="reference">{children}</ArtifactLink> : href && /^https?:\/\//i.test(href) ? <ExternalWebLink href={href}>{children}</ExternalWebLink> : <span>{children}</span>,
     code: ({ children, className, node }) => !className && node?.position?.start.line === node?.position?.end.line && typeof children === 'string' && isFileReference(children) ? <ArtifactLink path={children} inputKind={/^file:/i.test(children) ? 'reference' : 'path'}><code>{children}</code></ArtifactLink> : <code className={className}>{children}</code>,
-    img: ({ alt, src }) => src && isFileReference(src) ? <ArtifactLink path={src} inputKind="reference"><FileCode2 size={14} />{alt || t("查看图片")}</ArtifactLink> : <span className="image-placeholder">{t("[图片：")}{alt || t("未加载")}]</span>,
+    img: ({ alt, src }) => src && isFileReference(src) ? <ArtifactLink path={src} inputKind="reference">{alt || t('查看图片')}</ArtifactLink> : <span className="image-placeholder">{t('[图片：')}{alt || t('未加载')}]</span>,
   }}>{text}</ReactMarkdown></div>;
 }
 function useClock(active: boolean) {
@@ -547,10 +569,11 @@ function ToolCard({ tool }: { tool: ToolRecord }) {
   const command = /powershell|shell|command/i.test(tool.name);
   const artifact = React.useContext(ArtifactContext);
   const filePath = !command && typeof (args.path || args.file_path) === 'string' ? String(args.path || args.file_path) : '';
+  const openable = Boolean(filePath && tool.status === 'completed' && !tool.isError);
+  const label = t(TOOL_LABELS[tool.name] || tool.name);
   return <div className={`tool-card ${tool.status}`} onContextMenu={event => { if (filePath && tool.status === 'completed') void artifact?.showMenu(event, filePath); }}>
-    <button className="tool-summary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{tool.status === 'running' ? <LoaderCircle className="spin" size={14} /> : tool.status === 'failed' ? <AlertCircle size={14} /> : command ? <Terminal size={14} /> : <FileCode2 size={14} />}<span className="tool-label">{t(TOOL_LABELS[tool.name] || tool.name)}</span><span className="tool-short-args" title={summary}>{summary}</span>{tool.status === 'completed' && <Check size={12} className="tool-success" />}<ChevronRight size={13} className={expanded ? 'rotate-90' : ''} /></button>
-    {filePath && tool.status === 'completed' && <div className="tool-file-action"><ArtifactLink path={filePath} label={t("打开文件 {path}", { path: filePath })}><FileCode2 size={13} />{t("查看文件")}<ArrowUpRight size={12} /></ArtifactLink></div>}
-    {expanded && <div className="tool-details"><div className="tool-detail-heading">{t("输入")}</div><pre>{JSON.stringify(tool.args, null, 2)}</pre>{tool.result !== undefined && <><div className="tool-detail-heading">{tool.isError ? t("错误") : t("输出")}</div><pre>{tool.result || t("执行完成，无输出。")}</pre></>}{tool.status === 'running' && <div className="tool-waiting">{t("正在执行…")}</div>}</div>}
+    <div className={`tool-summary-row ${openable ? 'has-file-link' : ''}`}><button className="tool-summary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{tool.status === 'running' ? <LoaderCircle className="spin" size={14} /> : tool.status === 'failed' ? <AlertCircle size={14} /> : command ? <Terminal size={14} /> : <FileCode2 size={14} />}<span className="tool-label">{label}</span>{!openable && <span className="tool-short-args" title={summary}>{summary}</span>}</button>{openable && <ArtifactLink path={filePath} className="tool-file-link" label={t("打开文件 {path}", { path: filePath })}><span>{filePath}</span></ArtifactLink>}{tool.status === 'completed' && <Check size={12} className="tool-success" />}<button className="tool-expand icon-button" aria-label={t(expanded ? '收起{label}详情' : '展开{label}详情', { label })} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><ChevronRight size={13} className={expanded ? 'rotate-90' : ''} /></button></div>
+    {expanded && <div className="tool-details"><div className="tool-detail-heading">{t("输入")}</div><pre>{JSON.stringify(tool.args, null, 2)}</pre>{tool.result !== undefined && <><div className="tool-detail-heading">{tool.isError ? t('错误') : t('输出')}</div><pre>{tool.result || t('执行完成，无输出。')}</pre></>}{tool.status === 'running' && <div className="tool-waiting">{t("正在执行…")}</div>}</div>}
   </div>;
 }
 

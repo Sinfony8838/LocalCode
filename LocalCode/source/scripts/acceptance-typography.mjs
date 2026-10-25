@@ -22,6 +22,10 @@ const sessions = ['完成排版预览', '停止排版预览', '异常统计预�
       { id: finalMessageId, role: 'assistant', text: i === 1 ? '已停止当前任务。' : '这是一段中文排版预览，用来核对正文的字号、行距和段间距。\n\n文件链接与普通正文保持同一基线，**重点内容使用半粗体**。\n\n修改卡片默认显示三个文件，展开后可以查看其余文件。\n\n关闭 LocalCode，再运行 `Start.cmd` 即可生效。', createdAt: endedAt, runId }], tools: [],
     runs: [{ runId, status, startedAt: createdAt, endedAt, durationMs: 524000, ...(status === 'completed' ? { finalMessageId } : {}), changes: i === 0 ? changes : [], changeScope: 'workspace_snapshot', coverageNote, ...(i === 2 ? { changesError: '部分文件读取失败，统计不完整。' } : {}) }] };
 });
+const legacyCompleted = { ...structuredClone(sessions[3]), id: randomUUID(), title: '旧版会话完成预览', runs: [] };
+legacyCompleted.messages.unshift({ id: randomUUID(), role: 'assistant', text: '这是旧版中间说明，不应有复制按钮。', createdAt: legacyCompleted.createdAt });
+const legacyStopped = { ...structuredClone(legacyCompleted), id: randomUUID(), title: '旧版停止会话预览', status: 'interrupted' };
+sessions.push(legacyCompleted, legacyStopped);
 await fs.writeFile(path.join(root, 'data/index.json'), JSON.stringify({ version: 1, projects: [project], sessions, settings: { theme: 'light', fontSize: 14, defaultProviderId: 'local', providers: [provider] }, keys: {} }));
 await fs.writeFile(path.join(root, 'data/pets.json'), JSON.stringify({ version: 1, enabled: false }));
 const env = { ...process.env, LOCALCODE_HOME: root, LOCALCODE_SKIP_OLLAMA_START: '1' }; delete env.ELECTRON_RUN_AS_NODE;
@@ -56,6 +60,7 @@ try {
   checks.push('completed: elapsed time before final reply; no repeated timing; three-file preview, expand and collapse');
   await select('停止排版预览');
   const stopped = page.locator('.run-summary');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0);
   assert.match(await stopped.innerText(), /本轮已停止.*用时 8分钟44秒/s);
   assert.equal(await stopped.locator('button').count(), 0);
   const stoppedHeight = await stopped.evaluate(el => el.getBoundingClientRect().height);
@@ -64,12 +69,36 @@ try {
   await page.screenshot({ path: path.join(root, '02-stopped.png') });
   checks.push(`stopped: single ${stoppedHeight}px row; no empty details or boilerplate`);
   await select('异常统计预览');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0);
   assert.match(await page.locator('.run-summary').innerText(), /本轮运行失败/);
   assert.match(await page.locator('.run-summary-note').innerText(), /统计不完整/);
   checks.push('actual failures remain visible');
   await select('无文件修改预览');
   assert.equal(await page.locator('.run-summary').count(), 0); assert.equal(await page.locator('.run-timing').count(), 1);
+  const copy = page.getByRole('button', { name: '复制回答', exact: true });
+  assert.equal(await copy.count(), 1);
+  await app.evaluate(({ clipboard }) => { globalThis.__nativeWrite = clipboard.writeText; clipboard.writeText = async () => { throw new Error('fixture clipboard unavailable'); }; });
+  await copy.click(); await page.waitForFunction(() => document.querySelector('.message-copy')?.title === '复制失败，请重试');
+  await app.evaluate(({ clipboard }) => { clipboard.writeText = globalThis.__nativeWrite; });
+  await copy.click();
+  await page.waitForFunction(() => document.querySelector('.message-copy')?.title === '已复制');
+  assert(await app.evaluate(async ({ clipboard }, expected) => (await clipboard.readText()).replace(/\r\n/g, '\n') === expected.replace(/\r\n/g, '\n'), sessions[3].messages.at(-1).text), 'Copy must contain exactly the final synthetic reply (Windows line endings normalized)');
+  assert(await page.evaluate(async () => {
+    for (const invalid of [{ text: 'unexpected object' }, 'x'.repeat(2 * 1024 * 1024 + 1)]) {
+      try { await window.localcode.copyText(invalid); return false; } catch { /* Must reject before native clipboard mutation. */ }
+    }
+    return true;
+  }), 'Native copy must reject non-text and oversized input');
+  assert(await app.evaluate(async ({ clipboard }, expected) => (await clipboard.readText()).replace(/\r\n/g, '\n') === expected.replace(/\r\n/g, '\n'), sessions[3].messages.at(-1).text), 'Rejected copy must not change the clipboard');
   checks.push('completed without changes: only one timing line, no empty card');
+  await select('旧版会话完成预览');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 1);
+  await page.getByRole('button', { name: '复制回答', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.message-copy')?.title === '已复制');
+  assert(await app.evaluate(async ({ clipboard }, expected) => (await clipboard.readText()).replace(/\r\n/g, '\n') === expected.replace(/\r\n/g, '\n'), legacyCompleted.messages.at(-1).text), 'Legacy copy must contain only its final reply');
+  await select('旧版停止会话预览');
+  assert.equal(await page.getByRole('button', { name: '复制回答', exact: true }).count(), 0);
+  checks.push('no-file final answer and legacy completed history each have one final-only copy; interrupted/failed histories have none');
   await select('完成排版预览');
   await page.evaluate(async () => { await window.localcode.setFontSize(20); await window.localcode.setTheme('dark'); });
   await page.reload(); await page.getByLabel('任务输入').waitFor(); await select('完成排版预览');

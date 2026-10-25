@@ -8,7 +8,7 @@ export class ArtifactController extends ArtifactPreviews {
   async action(projectPath: string, input: string, action: ArtifactAction, inputKind: ArtifactInputKind = 'path'): Promise<void> {
     const target = await resolveArtifactPath(projectPath, input, inputKind);
     switch (action) {
-      case 'copy-path': clipboard.writeText(target.absolute); return;
+      case 'copy-path': await clipboard.writeText(target.absolute); return;
       case 'reveal': shell.showItemInFolder(target.absolute); return;
       case 'open': {
         const info = await this.info(projectPath, target.relative);

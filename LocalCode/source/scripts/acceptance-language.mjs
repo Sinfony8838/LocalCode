@@ -37,6 +37,12 @@ const expected = {
   ko: { language: '언어', select: '화면 및 대화 언어', newTask: '새 작업', input: '작업 입력', provider: '공급자 이름', models: '모델 설정', pets: '데스크톱 동반자 설정', viewer: '파일 뷰어', source: '소스', picker: '코딩 프로젝트 선택', balloon: '곁에서 로컬 코딩을 함께합니다', open: 'LocalCode 열기', close: '설정 닫기' },
 };
 const executable = process.argv[2];
+const navigation = {
+  'zh-CN': { home: '返回首页', heading: '首页', workspace: '选择工作项目', outside: '不在项目中工作', pin: '置顶项目', unpin: '取消置顶项目' },
+  en: { home: 'Go home', heading: 'Home', workspace: 'Choose a project', outside: 'Work outside a project', pin: 'Pin project', unpin: 'Unpin project' },
+  ja: { home: 'ホームに戻る', heading: 'ホーム', workspace: '作業プロジェクトを選択', outside: 'プロジェクト外で作業', pin: 'プロジェクトを固定', unpin: 'プロジェクトの固定を解除' },
+  ko: { home: '홈으로 이동', heading: '홈', workspace: '작업 프로젝트 선택', outside: '프로젝트 밖에서 작업', pin: '프로젝트 고정', unpin: '프로젝트 고정 해제' },
+};
 const env = { ...process.env, LOCALCODE_HOME: home, LOCALCODE_SKIP_OLLAMA_START: '1', TEMP: path.resolve('../cache'), TMP: path.resolve('../cache') };
 delete env.ELECTRON_RUN_AS_NODE;
 let app, page, pet;
@@ -94,9 +100,19 @@ try {
     await page.locator('.settings-nav button').nth(3).click();
     await page.getByRole('region', { name: text.pets, exact: true }).waitFor();
     await page.getByRole('button', { name: text.close, exact: true }).click();
+    const nav = navigation[locale];
+    await page.getByRole('button', { name: nav.home, exact: true }).click();
+    assert.equal(await page.locator('.workspace-heading h1').innerText(), nav.heading);
+    await page.getByRole('button', { name: nav.workspace, exact: true }).click();
+    await page.getByRole('option', { name: nav.outside, exact: true }).click();
+    assert.equal(await page.getByLabel(text.input, { exact: true }).isEnabled(), true);
     await page.locator('.activity-rail button').nth(2).click();
     assert.equal((await app.evaluate(() => globalThis.languagePickerTitles)).at(-1), text.picker);
     await page.locator('.project-item.active').waitFor({ state: 'attached' });
+    await page.locator('.project-more').first().click();
+    await page.getByRole('menuitem', { name: nav.pin, exact: true }).click();
+    await page.locator('.project-more').first().click();
+    await page.getByRole('menuitem', { name: nav.unpin, exact: true }).click();
     await page.locator('.activity-rail button').nth(3).click();
     await page.locator('.inspector-tabs button').nth(1).click();
     await page.getByRole('button', { name: '用户代码.txt', exact: true }).click();
@@ -105,7 +121,7 @@ try {
     assert.equal(await page.locator('.artifact-toolbar [role="group"] button').nth(1).innerText(), text.source);
     await page.locator('.artifact-header button').last().click();
     if ((await page.locator('.app-shell').getAttribute('class')).includes('sidebar-hidden')) await page.locator('.activity-rail button').nth(1).click();
-    checks.push(`${locale}: immediate language selector, navigation, model settings, pet settings, floating companion, native picker and file viewer; user file text preserved`);
+    checks.push(`${locale}: language selector, projectless picker, home and project pin/unpin, model/pet settings, floating companion, native picker and file viewer; user file text preserved`);
   }
   const before = (await page.evaluate(() => window.localcode.bootstrap())).settings.locale;
   for (const value of ['fr', 'en-US', '', null, {}, 1]) {
