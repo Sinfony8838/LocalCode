@@ -49,6 +49,11 @@ jobs:
         working-directory: LocalCode/source
       - run: npm run build
         working-directory: LocalCode/source
+      - name: Verify desktop pet image API helpers with local fixtures
+        id: pet_skill
+        continue-on-error: true
+        run: node --test scripts/test-pet-skill.mjs
+        working-directory: LocalCode/source
       - name: Verify turn summaries and embedded artifacts in Electron
         id: artifact_ui
         continue-on-error: true
@@ -109,6 +114,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/acceptance-agent-modes.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/acceptance-pet-customization.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Create portable download and checksums
         shell: pwsh
         run: |
@@ -138,6 +145,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          if ('${{ steps.pet_skill.outcome }}' -ne 'success') { throw 'Desktop pet image API helper tests must pass.' }
           if ('${{ steps.setup51.outcome }}' -ne 'success' -or '${{ steps.setup7.outcome }}' -ne 'success' -or '${{ steps.unit_tests.outcome }}' -ne 'success' -or '${{ steps.artifact_ui.outcome }}' -ne 'success' -or '${{ steps.model_ui.outcome }}' -ne 'success' -or '${{ steps.agent_modes_ui.outcome }}' -ne 'success' -or '${{ steps.task_projects_ui.outcome }}' -ne 'success' -or '${{ steps.typography_ui.outcome }}' -ne 'success' -or '${{ steps.checkpoint_ui.outcome }}' -ne 'success' -or '${{ steps.language_ui.outcome }}' -ne 'success' -or '${{ steps.packaged_ui.outcome }}' -ne 'success') {
             throw 'All setup, unit, source desktop and packaged desktop suites must pass. No download is published on failure.'
           }

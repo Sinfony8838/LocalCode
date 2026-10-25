@@ -1,0 +1,4 @@
+interface:
+  display_name: "创建桌宠"
+  short_description: "在项目中调用图片模型 API，制作并验证 LocalCode 自定义动画桌宠。"
+  default_prompt: "使用 $create-desktop-pet 为当前项目制作一个透明背景的动画桌宠。"

@@ -10,6 +10,8 @@ A local-first coding desktop for Windows: Electron + React + TypeScript, a separ
 
 This repository contains the application architecture, source, tests, dependency lockfile, and bootstrap scripts.
 
+Settings → Desktop companion now includes a preview and custom pet library. The bundled `create-desktop-pet` skill lets a project task use the selected chat model to coordinate creation, call a separate image API, validate and preview an atlas, then import it as a companion. Public builds do not include third-party character art. See [custom desktop pets](docs/CUSTOM_PETS.md).
+
 Tasks can start without a project folder. Choose a workspace above the composer when needed, or move an existing projectless task into a project while keeping its conversation. Projects support pinning and collapsible task groups; sidebar preferences persist. File names open inline, and copy is available once per final answer. See [tasks and projects](docs/TASKS_AND_PROJECTS.md).
 
 Conversation text uses the system sans-serif font, with a 14 px default size, 24 px line height, and 12 px paragraph spacing. Font size remains adjustable in Settings → Appearance. Stop status and elapsed time share one line; completed runs show elapsed time before the final reply. File cards show three files initially and expand to reveal the rest. Routine coverage notes are hidden, while actual statistics errors remain visible.
@@ -47,7 +49,7 @@ Opening LocalCode does not install your project's language runtimes or build too
 
 ### Prebuilt portable desktop: extract and open
 
-A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.19-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
+A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.22-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
 
 1. Double-click the extracted **`Start.cmd`**. No build tools or model downloads are needed to open the desktop.
 2. Choose your connection in Settings:

@@ -40,6 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
   edit: '修改文件', edit_file: '修改文件', list: '浏览目录', list_files: '浏览目录',
   browse: '浏览目录', find: '查找文件', grep: '搜索代码', search: '搜索代码',
   search_files: '搜索代码', powershell: '运行命令', shell: '运行命令',
+  load_skill: '读取桌宠定制 Skill',
 };
 const isBusy = (status?: RunStatus) => status === 'running' || status === 'awaiting_approval' || status === 'awaiting_input';
 const shortPath = (path: string) => path.replace(/\\/g, '/').split('/').filter(Boolean).slice(-2).join('/');
@@ -281,7 +282,8 @@ export default function App() {
 
   const openSession = async (session: SessionView) => {
     navigationRevision.current++;
-    setActiveProjectId(session.projectId || ''); setActiveSessionId(session.id); setProviderId(session.providerId); setModelId(session.modelId || ''); setDirectory('');
+    const selection = draftModels[session.id];
+    setActiveProjectId(session.projectId || ''); setActiveSessionId(session.id); setProviderId(selection?.providerId ?? session.providerId); setModelId(selection?.modelId ?? session.modelId ?? ''); setDirectory('');
     try {
       const revision = eventRevision.current;
       const current = await window.localcode.openSession(session.id);
@@ -299,6 +301,26 @@ export default function App() {
 
   const newSession = () => {
     goHome(); setActiveProjectId(''); setDirectory(''); setFileView(null);
+  };
+  const createPetInProject = async (input: { name: string; description: string }) => {
+    const navigation = ++navigationRevision.current;
+    let projectId = activeProjectId;
+    if (!projectId) {
+      const picked = await window.localcode.pickProject();
+      if (!picked) return;
+      await refresh(); projectId = picked.id;
+    }
+    if (navigation !== navigationRevision.current) return;
+    const session = await window.localcode.createSession(projectId);
+    putSession(session);
+    const prompt = t('$create-desktop-pet\n请使用桌宠定制 Skill，为当前项目创建一个 LocalCode 虚拟宠物。\n名称：{name}\n角色与风格：{description}\n先读取 Skill，使用我选择的模型完成设计与制作流程。需要生图时检查图片 API 配置，缺少时说明所需配置，不要把聊天 API 当作图片 API。产物保存在项目内的新目录，输出通过校验的 pet.json 和 pet.png，并说明预览与导入方式。', { name: input.name, description: input.description || t('请先和我确认角色外观与风格。') });
+    setDrafts(previous => ({ ...previous, [session.id]: { ...emptyDraft(session), text: prompt } }));
+    setDraftModels(previous => ({ ...previous, [session.id]: { providerId: provider?.id || providerId, modelId: provider?.model || modelId } }));
+    if (navigation !== navigationRevision.current) return;
+    setActiveProjectId(projectId); setActiveSessionId(session.id); setDirectory(''); setFileView(null);
+    setNotice(t('桌宠定制任务已准备好。确认模型和描述后发送。')); setSettingsOpen(false);
+    setInspectorOpen(false); artifacts.close(); artifacts.closeMenu();
+    requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const chooseWorkspace = (projectId: string | null) => {
     if (activeSession) { if (projectId && !activeSession.projectId) void moveTask(activeSession.id, projectId); }
@@ -563,7 +585,7 @@ export default function App() {
     </aside>}
 
     {error && <div className="toast error-toast" role="alert"><AlertCircle size={18} /><div><strong>{t("操作未完成")}</strong><p>{t(error)}</p></div><button className="icon-button" title={t("关闭错误提示")} aria-label={t("关闭错误提示")} onClick={() => setError('')}><X size={15} /></button></div>}
-    {settingsOpen && boot && <SettingsDialog initialTab={settingsInitialTab} returnFocusTo={settingsOpener.current} settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onLocale={changeLocale} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
+    {settingsOpen && boot && <SettingsDialog onCreatePet={createPetInProject} hasProject={Boolean(activeProjectId)} initialTab={settingsInitialTab} returnFocusTo={settingsOpener.current} settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onLocale={changeLocale} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
     {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} returnFocusTo={checkpointOpener.current} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>{t("重命名会话")}</h2><label className="field"><span>{t("会话名称")}</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>{t("取消")}</button><button className="primary-button" disabled={!renameTitle.trim()}>{t("保存")}</button></div></form></div>}
     {moveSessionId && sessions.find(session => session.id === moveSessionId) && <MoveTaskDialog session={sessions.find(session => session.id === moveSessionId)!} projects={boot?.projects || []} onClose={() => setMoveSessionId('')} onMove={projectId => moveTask(moveSessionId, projectId)} onCreate={() => openProject(moveSessionId)} />}
@@ -739,12 +761,13 @@ function UserMenu({ onOpenSettings, labels }: {
   </div>;
 }
 
-function SettingsDialog({ initialTab, returnFocusTo, settings, health, version, onClose, onTheme, onLocale, onFontSize, onHealth, healthPending, onSaved, onOpenData }: {
+function SettingsDialog({ initialTab, returnFocusTo, settings, health, version, onClose, onTheme, onLocale, onFontSize, onHealth, healthPending, onSaved, onOpenData, onCreatePet, hasProject }: {
   initialTab: SettingsEntryTab; returnFocusTo: HTMLElement | null;
   settings: AppSettings; health: ModelHealth; version: string; onClose: () => void; onTheme: (theme: Theme) => Promise<void>;
   onFontSize: (fontSize: number) => Promise<void>;
   onLocale: (locale: AppLocale) => Promise<void>;
   onHealth: () => Promise<void>; healthPending: boolean; onSaved: () => Promise<unknown>; onOpenData: () => void;
+  onCreatePet: (input: { name: string; description: string }) => Promise<void>; hasProject: boolean;
 }) {
   const [tab, setTab] = useState<'models' | 'language' | 'appearance' | 'pets' | 'about'>(initialTab);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -752,9 +775,9 @@ function SettingsDialog({ initialTab, returnFocusTo, settings, health, version, 
     closeButton.current?.focus();
     return () => { if (returnFocusTo?.isConnected) returnFocusTo.focus(); };
   }, [returnFocusTo]);
-  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section className={`settings-dialog ${tab === 'models' ? 'model-settings-dialog' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><h2 id="settings-title">{t("设置")}</h2><button ref={closeButton} className="icon-button" aria-label={t("关闭设置")} onClick={onClose}><X size={19} /></button></header><div className="settings-layout"><nav className="settings-nav"><button className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Cpu size={16} />{t("模型设置")}</button><button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={16} />{t('语言')}</button><button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}><Monitor size={16} />{t("外观")}</button><button className={tab === 'pets' ? 'active' : ''} onClick={() => setTab('pets')}><Sparkles size={16} />{t("桌宠")}</button><button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}><BrandLogo />{t("关于")}</button></nav><div className="settings-content">
+  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section className={`settings-dialog ${tab === 'models' ? 'model-settings-dialog' : tab === 'pets' ? 'pet-settings-dialog' : ''}`} role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><h2 id="settings-title">{t("设置")}</h2><button ref={closeButton} className="icon-button" aria-label={t("关闭设置")} onClick={onClose}><X size={19} /></button></header><div className="settings-layout"><nav className="settings-nav"><button className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Cpu size={16} />{t("模型设置")}</button><button className={tab === 'language' ? 'active' : ''} onClick={() => setTab('language')}><Languages size={16} />{t('语言')}</button><button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}><Monitor size={16} />{t("外观")}</button><button className={tab === 'pets' ? 'active' : ''} onClick={() => setTab('pets')}><Sparkles size={16} />{t("桌宠")}</button><button className={tab === 'about' ? 'active' : ''} onClick={() => setTab('about')}><BrandLogo />{t("关于")}</button></nav><div className="settings-content">
       {tab === 'language' && <LanguageControl value={settings.locale} onChange={onLocale} />}
-      {tab === 'pets' && <PetControls />}
+      {tab === 'pets' && <PetControls onCreateInProject={onCreatePet} hasProject={hasProject} />}
       {tab === 'models' && <ModelSettings settings={settings} health={health} onHealth={onHealth} healthPending={healthPending} onSaved={onSaved} />}
       {tab === 'appearance' && <><div className="settings-section-heading"><h3>{t("外观")}</h3><p>{t("为你的工作区选择舒适的配色与字号。")}</p></div><FontSizeControl value={settings.fontSize} onChange={onFontSize} /><div className="theme-options">{(['light', 'dark'] as const).map(theme => <button key={theme} className={`theme-option ${settings.theme === theme ? 'selected' : ''}`} onClick={() => void onTheme(theme)}><div className={`theme-preview ${theme}`}><i /><div><b /><span /><span /><em /></div><i /></div><span>{theme === 'light' ? <Sun size={15} /> : <Moon size={15} />}{theme === 'light' ? t("浅色") : t("深色")}{settings.theme === theme && <Check size={14} />}</span></button>)}</div></>}
       {tab === 'about' && <><div className="about-brand"><div className="brand-mark"><BrandLogo /></div><h3>LocalCode</h3><p>{t("让想法，在本地落地。")}</p><span>{t("版本 ")}{version || '0.1.0'}</span></div><div className="about-details"><div><span>{t("Agent 运行时")}</span><strong>pi SDK 1.4.0</strong></div><div><span>{t("默认运行方式")}</span><strong>{t("每个会话独立 Agent")}</strong></div><div><span>{t("文件权限")}</span><strong>{t("所选项目内自动修改")}</strong></div><div><span>{t("终端权限")}</span><strong>{t("每条命令单独确认")}</strong></div></div><p className="about-disclaimer">{t("终端命令以当前 Windows 用户权限运行。应用的项目范围校验不等于操作系统沙箱。")}</p><button className="secondary-button data-folder-button" onClick={onOpenData}><FolderOpen size={15} />{t("打开应用数据目录")}</button></>}

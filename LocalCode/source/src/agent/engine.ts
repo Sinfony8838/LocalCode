@@ -10,6 +10,7 @@ import type { AgentEvent, Approval, RunRequest, WorkerCommand, RunProgress, Ques
 import { killActiveCommands } from '../core/command.js';
 import { createWorkspaceTools, type WorkspaceToolContext, type ApprovalRequest } from './tools.js';
 import { DEFAULT_LOCALE, isAppLocale, translate, type AppLocale } from '../shared/i18n.js';
+import { createSkillTool, PET_SKILL_DISCOVERY } from './skills.js';
 import { managedTransport, type RequestLease } from './transport.js';
 
 type EventBody = AgentEvent extends infer E ? E extends AgentEvent ? Omit<E, 'runId' | 'sessionId'> : never : never;
@@ -96,7 +97,7 @@ export function agentSystemPrompt(locale?: AppLocale, systemPrompt = SYSTEM_PROM
 export function finalSummaryPrompt(locale?: AppLocale): string { return `${FINAL_SUMMARY_PROMPT}\n\n${responseLanguagePolicy(locale)}`; }
 
 export function systemPromptFor(request: RunRequest): string {
-  let text = request.projectPath ? SYSTEM_PROMPT : CHAT_SYSTEM_PROMPT;
+  let text = request.projectPath ? SYSTEM_PROMPT + PET_SKILL_DISCOVERY : CHAT_SYSTEM_PROMPT;
   if (request.provider.kind === 'ollama') text += '\n本地模型每轮最多12次工具调用，接近上限时收尾。';
   if (request.workMode === 'plan') text += '\n当前为计划模式：只读探索，不得修改文件或运行命令。先调查已有资料，再用 ask_question 问题卡确认影响方案的重要取舍；充分理解后调用 propose_plan 展示可实施的完整计划（目标、改动、接口、验收、假设）。只有用户点击实施计划后后续执行轮才可修改。';
   if (request.goal) text += `\n当前目标：${request.goal.objective}\n持续推进直到目标有证据完成、真正受阻、用户暂停或主机时限耗尽。完成前逐项核对要求与实际验证证据，调用 update_goal complete 并提供依据。不能把预算到达、一次回复结束或未经验证的推测当作完成。不得自行扩大目标或时限。`;
@@ -222,6 +223,7 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   });
   const customTools = strictTools([
     ...(request.projectPath || request.attachments?.some(a => a.kind !== 'image') || request.workMode === 'plan' || request.goal ? createWorkspaceTools(context) : []),
+    ...(request.projectPath ? [createSkillTool(context)] : []),
   ]);
   // The SDK needs a cwd even for chat. Its private transcript directory is not a workspace,
   // and no filesystem, command, resource discovery or built-in tools are exposed there.
