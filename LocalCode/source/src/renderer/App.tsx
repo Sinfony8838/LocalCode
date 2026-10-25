@@ -69,6 +69,7 @@ export default function App() {
   const [checkpointError, setCheckpointError] = useState('');
   const checkpointRequest = useRef(0);
   const checkpointLock = useRef(false);
+  const checkpointOpener = useRef<HTMLButtonElement | null>(null);
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({});
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, boolean>>({});
   const [pendingStops, setPendingStops] = useState<Record<string, boolean>>({});
@@ -326,9 +327,11 @@ export default function App() {
     try { await window.localcode.undo({ sessionId: activeSession.id, path: change.path }); await refreshChanges(); }
     catch (failure) { setError(errorText(failure)); await refreshChanges(); }
   };
-  const previewCheckpoint = async (change: ChangeView) => {
+  const previewCheckpoint = async (change: ChangeView, opener: HTMLButtonElement) => {
     if (!activeSession || changesBusy || !change.conflict || checkpointLock.current) return;
     const sessionId = activeSession.id; const request = ++checkpointRequest.current;
+    // Capture before disabling the trigger for the asynchronous preview request.
+    checkpointOpener.current = opener;
     checkpointLock.current = true; setCheckpointPending(true); setCheckpointError('');
     try {
       const preview = await window.localcode.previewCheckpoint({ sessionId, path: change.path });
@@ -445,7 +448,7 @@ export default function App() {
         <div className="inspector-section-label"><span>本次会话</span><button className="icon-button" title="刷新文件差异" aria-label="刷新文件差异" onClick={() => void refreshChanges()}><RefreshCw size={13} /></button></div>
         {!changes.length ? <div className="panel-empty"><div className="panel-empty-icon"><GitCompareArrows size={27} strokeWidth={1.4} /></div><h3>修改会显示在这里</h3><p>Agent 编辑文件后，你可以查看差异，并撤销本次会话的修改。</p><span className="panel-footnote">不会自动提交到 Git</span></div> : <>
           <div className="change-files">{changes.map(change => <button key={change.path} className={`change-file ${selectedChange?.path === change.path ? 'active' : ''}`} onClick={() => setChangePath(change.path)} onContextMenu={event => void artifacts.showMenu(event, change.path)} title={change.path}>{change.created ? <FilePlus2 size={14} /> : <FileCode2 size={14} />}<span>{change.path}</span>{change.conflict ? <AlertCircle size={13} className="warning-text" /> : <span className={change.created ? 'change-mark added' : 'change-mark'}>{change.created ? 'A' : 'M'}</span>}</button>)}</div>
-          {selectedChange && <div className="diff-pane"><div className="diff-title"><span title={selectedChange.path}>{shortPath(selectedChange.path)}</span><button className="icon-button" aria-label="撤销此文件修改" title={selectedChange.conflict ? '文件有其他修改，不能直接撤销' : changesBusy ? '所有任务结束后可撤销' : '撤销本会话对此文件的修改'} disabled={changesBusy || selectedChange.conflict} onClick={() => void undo(selectedChange)}><Undo2 size={14} /></button></div>{selectedChange.conflict && <div className="conflict-note"><AlertCircle size={13} /><div>文件已有其他修改，已保护当前内容，无法直接撤销。<button className="secondary-button checkpoint-preview-button" disabled={changesBusy} title={changesBusy ? '请等待所有任务结束' : '检查当前内容后才能继续编辑'} onClick={() => void previewCheckpoint(selectedChange)}>预览并设为新起点</button></div></div>}<DiffContent change={selectedChange} /></div>}
+          {selectedChange && <div className="diff-pane"><div className="diff-title"><span title={selectedChange.path}>{shortPath(selectedChange.path)}</span><button className="icon-button" aria-label="撤销此文件修改" title={selectedChange.conflict ? '文件有其他修改，不能直接撤销' : changesBusy ? '所有任务结束后可撤销' : '撤销本会话对此文件的修改'} disabled={changesBusy || selectedChange.conflict} onClick={() => void undo(selectedChange)}><Undo2 size={14} /></button></div>{selectedChange.conflict && <div className="conflict-note"><AlertCircle size={13} /><div>文件已有其他修改，已保护当前内容，无法直接撤销。<button className="secondary-button checkpoint-preview-button" disabled={changesBusy} title={changesBusy ? '请等待所有任务结束' : '检查当前内容后才能继续编辑'} onClick={event => void previewCheckpoint(selectedChange, event.currentTarget)}>预览并设为新起点</button></div></div>}<DiffContent change={selectedChange} /></div>}
         </>}
       </> : <>
         <div className="file-breadcrumb"><button className="icon-button" disabled={!directory && !fileView} aria-label="返回上级目录" title="返回目录" onClick={() => { if (fileView) setFileView(null); else setDirectory(directory.replace(/\\/g, '/').split('/').slice(0, -1).join('/')); }}><ArrowLeft size={14} /></button><span title={fileView?.path || directory || project?.path}>{fileView?.path || directory || project?.name || '项目文件'}</span></div>
@@ -456,7 +459,7 @@ export default function App() {
 
     {error && <div className="toast error-toast" role="alert"><AlertCircle size={18} /><div><strong>操作未完成</strong><p>{error}</p></div><button className="icon-button" title="关闭错误提示" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15} /></button></div>}
     {settingsOpen && boot && <SettingsDialog settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
-    {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
+    {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} returnFocusTo={checkpointOpener.current} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>重命名会话</h2><label className="field"><span>会话名称</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>取消</button><button className="primary-button" disabled={!renameTitle.trim()}>保存</button></div></form></div>}
     <ArtifactPanel controller={artifacts} />
     <ArtifactMenu controller={artifacts} />

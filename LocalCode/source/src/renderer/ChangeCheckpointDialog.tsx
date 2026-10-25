@@ -1,16 +1,22 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import type { ChangeCheckpointPreview } from '../shared/contracts';
 
-export default function ChangeCheckpointDialog({ preview, pending, error, onCancel, onConfirm }: {
-  preview: ChangeCheckpointPreview; pending: boolean; error: string; onCancel: () => void; onConfirm: () => void;
+export default function ChangeCheckpointDialog({ preview, pending, error, returnFocusTo, onCancel, onConfirm }: {
+  preview: ChangeCheckpointPreview; pending: boolean; error: string; returnFocusTo?: HTMLElement | null; onCancel: () => void; onConfirm: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
     const dialog = dialogRef.current!;
-    const previous = document.activeElement as HTMLElement | null;
     dialog.showModal();
-    return () => { dialog.close(); if (previous?.isConnected) previous.focus(); };
-  }, []);
+    // React autoFocus runs while the dialog is still hidden. Set initial focus
+    // only after showModal, rather than letting the focusable preview receive it.
+    cancelRef.current?.focus({ preventScroll: true });
+    return () => {
+      dialog.close();
+      if (returnFocusTo?.isConnected && !returnFocusTo.matches(':disabled')) returnFocusTo.focus({ preventScroll: true });
+    };
+  }, [returnFocusTo]);
   return <dialog ref={dialogRef} className="checkpoint-dialog" aria-labelledby="checkpoint-title" aria-describedby="checkpoint-description"
     onCancel={event => { event.preventDefault(); if (!pending) onCancel(); }}>
     <h2 id="checkpoint-title">确认当前内容为新起点</h2>
@@ -20,7 +26,7 @@ export default function ChangeCheckpointDialog({ preview, pending, error, onCanc
     <p className="checkpoint-hash">SHA-256：<code>{preview.currentHash}</code></p>
     {error && <p className="checkpoint-error" role="alert">{error}</p>}
     <div className="dialog-actions">
-      <button type="button" autoFocus className="secondary-button" disabled={pending} onClick={onCancel}>取消</button>
+      <button ref={cancelRef} type="button" className="secondary-button" disabled={pending} onClick={onCancel}>取消</button>
       <button type="button" className="primary-button" disabled={pending || Boolean(error)} onClick={onConfirm}>{pending ? '正在保存新起点…' : '确认并保留当前内容'}</button>
     </div>
   </dialog>;
