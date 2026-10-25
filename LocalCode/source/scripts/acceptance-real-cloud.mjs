@@ -1,5 +1,6 @@
 // Explicit opt-in paid acceptance. Reads provider metadata only. The user enters
 // credentials in the isolated desktop; source credentials/profiles are never copied.
+// A later packaged check may reopen that exact synthetic test home normally.
 import { _electron as electron } from 'playwright';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -9,34 +10,44 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { values } = parseArgs({ options: { 'provider-index': { type: 'string' }, executable: { type: 'string' } } });
-assert(values['provider-index'], 'Explicit --provider-index is required; this script makes real cloud requests.');
-const originalBytes = await fs.readFile(values['provider-index']);
+const { values } = parseArgs({ options: { 'provider-index': { type: 'string' }, 'reuse-test-home': { type: 'string' }, executable: { type: 'string' } } });
+assert(Boolean(values['provider-index']) !== Boolean(values['reuse-test-home']), 'Choose exactly one explicit --provider-index or --reuse-test-home; this script makes real cloud requests.');
+const reusedHome = values['reuse-test-home'] ? path.resolve(values['reuse-test-home']) : undefined;
+if (reusedHome) {
+  const previous = JSON.parse(await fs.readFile(path.resolve(reusedHome, '../report.json'), 'utf8'));
+  assert(previous.passed === true && previous.productionHistoriesUsed === false, 'Only a previously successful synthetic acceptance home can be reused.');
+  assert.equal(path.resolve(previous.root, 'home').toLowerCase(), reusedHome.toLowerCase(), 'Acceptance home does not match its recorded provenance.');
+}
+const configurationIndex = reusedHome ? path.join(reusedHome, 'data/index.json') : values['provider-index'];
+const originalBytes = await fs.readFile(configurationIndex);
 const source = JSON.parse(originalBytes.toString('utf8').replace(/^\uFEFF/, ''));
 const selected = source.settings.providers.find(provider => provider.kind === 'anthropic' && provider.baseUrl.replace(/\/$/, '') === 'https://ark.cn-beijing.volces.com/api/coding' && provider.model === 'ark-code-latest');
 assert(selected, 'Requested saved Ark Coding Plan configuration was not found.');
 const model = selected.models?.find(item => item.id === 'ark-code-latest') ?? { id: selected.model, contextWindow: selected.contextWindow, maxTokens: selected.maxTokens, enabled: true };
-const provider = { ...selected, model: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens, enabled: true, models: [{ ...model, enabled: true }], hasKey: false };
+const provider = { ...selected, model: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens, enabled: true, models: [{ ...model, enabled: true }], hasKey: Boolean(reusedHome && selected.hasKey) };
 const root = path.resolve(`../evidence/real-cloud-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-const home = path.join(root, 'home'); const project = path.join(root, 'project');
-await fs.mkdir(path.join(home, 'data'), { recursive: true }); await fs.mkdir(project);
+const home = reusedHome ?? path.join(root, 'home'); const project = path.join(root, 'project');
+await fs.mkdir(path.join(home, 'data'), { recursive: true }); await fs.mkdir(project, { recursive: true });
 const local = { id: 'local', name: 'Ollama', kind: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'localcode-agent:latest', contextWindow: 8192, maxTokens: 1024, hasKey: false };
-await fs.writeFile(path.join(home, 'data/index.json'), JSON.stringify({ version: 1, projects: [], sessions: [], settings: { theme: 'light', fontSize: 14, defaultProviderId: provider.id, providers: [local, provider] }, keys: {} }), { mode: 0o600, flag: 'wx' });
+if (!reusedHome) await fs.writeFile(path.join(home, 'data/index.json'), JSON.stringify({ version: 1, projects: [], sessions: [], settings: { theme: 'light', fontSize: 14, defaultProviderId: provider.id, providers: [local, provider] }, keys: {} }), { mode: 0o600, flag: 'wx' });
 const fixtureRoot = path.resolve('../../scripts/acceptance/project');
 for (const name of ['numbers.ps1', 'Test-Numbers.ps1']) await fs.copyFile(path.join(fixtureRoot, name), path.join(project, name));
 const env = { ...process.env, LOCALCODE_HOME: home, LOCALCODE_SKIP_OLLAMA_START: '1', TEMP: path.resolve('../cache'), TMP: path.resolve('../cache') }; delete env.ELECTRON_RUN_AS_NODE;
-const checks = [], errors = [], runs = [];
+const checks = [], errors = [], runs = [], startedSessions = new Set(), startedRuns = new Set();
 const evidence = { provider: provider.name, kind: provider.kind, baseUrl: provider.baseUrl, requestedModel: provider.model,
   contextWindow: provider.contextWindow, maxTokens: provider.maxTokens, cost: null, costStatus: 'UNKNOWN: subscription/provider billing not exposed by the application', connectionCalls: 0,
   startedAt: new Date().toISOString(), commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-  dirtySource: Boolean(execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { encoding: 'utf8' }).trim()), originalConfigurationModified: false };
+  dirtySource: Boolean(execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { encoding: 'utf8' }).trim()), originalConfigurationModified: false,
+  configurationScope: reusedHome ? 'reopened synthetic acceptance home; no original installation access or credential/profile copy' : 'metadata read from original configuration; credentials entered in isolated UI' };
 let app, page, projectId;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function poll(work, label, timeout = 240000) { const end = Date.now() + timeout; while (Date.now() < end) { const value = await work(); if (value) return value; await sleep(150); } throw new Error(`Timed out: ${label}`); }
 const state = id => page.evaluate(id => window.localcode.openSession(id), id);
 async function runTask(label, prompt, approvalMode) {
   const session = await page.evaluate(id => window.localcode.createSession(id), projectId);
+  startedSessions.add(session.id);
   const receipt = await page.evaluate(input => window.localcode.send(input), { sessionId: session.id, providerId: provider.id, modelId: provider.model, prompt });
+  startedRuns.add(receipt.runId);
   const approvals = []; const seen = new Set(); let cancelled = false;
   const final = await poll(async () => {
     const current = await state(session.id);
@@ -83,8 +94,14 @@ try {
   page.on('pageerror', error => errors.push(error.message)); await page.getByLabel('任务输入').waitFor();
   await page.getByRole('button', { name: '应用设置', exact: true }).click();
   await page.getByRole('button', { name: provider.name, exact: true }).click();
-  console.log('WAITING_FOR_MANUAL_KEY: Enter the Ark API Key in this isolated LocalCode Settings window and click Save. Do not send the key in chat.');
-  await poll(async () => page.evaluate(id => window.localcode.bootstrap().then(state => state.settings.providers.find(item => item.id === id)?.hasKey === true), provider.id), 'manual credential entry and save', 20 * 60 * 1000);
+  if (reusedHome) {
+    assert((await page.evaluate(() => window.localcode.bootstrap())).settings.providers.find(item => item.id === provider.id)?.hasKey, 'Reused acceptance home has no saved credential.');
+    await page.getByLabel('供应商名称', { exact: true }).fill(provider.name + ' ');
+    await page.getByRole('button', { name: '保存配置', exact: true }).click();
+  } else {
+    console.log('WAITING_FOR_MANUAL_KEY: Enter the Ark API Key in this isolated LocalCode Settings window and click Save. Do not send the key in chat.');
+    await poll(async () => page.evaluate(id => window.localcode.bootstrap().then(state => state.settings.providers.find(item => item.id === id)?.hasKey === true), provider.id), 'manual credential entry and save', 20 * 60 * 1000);
+  }
   await page.getByRole('status').filter({ hasText: '设置已保存' }).waitFor();
   await page.getByRole('button', { name: '测试模型 1', exact: true }).click();
   await poll(async () => {
@@ -126,11 +143,11 @@ finally {
   await app?.close().catch(() => {});
   const usage = [], responses = new Set(connection?.models ?? []); let taskRequests = 0;
   for (const name of await fs.readdir(path.join(home, 'data/logs')).catch(() => [])) {
-    if (!name.startsWith('agent-') || !name.endsWith('.jsonl')) continue;
+    if (!name.startsWith('agent-') || !name.endsWith('.jsonl') || !startedRuns.has(name.slice('agent-'.length, -'.jsonl'.length))) continue;
     for (const line of (await fs.readFile(path.join(home, 'data/logs', name), 'utf8')).split('\n').filter(Boolean)) { const item = JSON.parse(line); if (item.type === 'request_start') taskRequests++; }
   }
   const index = JSON.parse(await fs.readFile(path.join(home, 'data/index.json'), 'utf8'));
-  for (const session of index.sessions) if (session.piFile) {
+  for (const session of index.sessions) if (startedSessions.has(session.id) && session.piFile) {
     for (const line of (await fs.readFile(session.piFile, 'utf8')).split('\n').filter(Boolean)) {
       const item = JSON.parse(line); const message = item.message;
       if (message?.role !== 'assistant') continue;
@@ -138,7 +155,7 @@ finally {
       if (message.usage) usage.push({ input: message.usage.input, output: message.usage.output, cacheRead: message.usage.cacheRead, cacheWrite: message.usage.cacheWrite, totalTokens: message.usage.totalTokens });
     }
   }
-  evidence.originalConfigurationModified = !(await fs.readFile(values['provider-index'])).equals(originalBytes);
+  evidence.originalConfigurationModified = reusedHome ? false : !(await fs.readFile(configurationIndex)).equals(originalBytes);
   if (evidence.originalConfigurationModified) errors.push('Source configuration changed during acceptance; it was not written by this script.');
   const report = { ...evidence, passed: errors.length === 0 && checks.length === 4, root, executable: values.executable || 'source', checks, runs, taskRequests, totalRequests: taskRequests + evidence.connectionCalls, requestCountBasis: 'Connection fetch calls plus worker request_start attempts; provider billing confirmation unavailable', connectionUsage: connection?.usage ?? [], responseModels: [...responses], responseModelVersionStatus: 'Only provider-returned model identifiers are recorded; mutable alias underlying version may be undisclosed.', usage, errors, endedAt: new Date().toISOString(), releaseReady: false, productionHistoriesUsed: false };
   await fs.writeFile(path.join(root, 'report.json'), JSON.stringify(report, null, 2));
