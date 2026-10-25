@@ -1,6 +1,6 @@
 {
   "name": "localcode-desktop",
-  "version": "0.1.21",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "LocalCode - local-first coding workspace",
@@ -19,7 +19,9 @@
     "@earendil-works/pi-ai": "1.4.0",
     "typebox": "1.3.27",
     "diff": "8.0.4",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "web-tree-sitter": "0.25.10",
+    "tree-sitter-powershell": "0.25.10"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",

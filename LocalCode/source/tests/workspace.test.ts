@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createWorkspaceTools } from '../src/agent/tools.js';
 import { getChanges, listWorkspaceFiles, MAX_FILE_BYTES, readWorkspaceFile, readWorkspaceText, resolveWorkspacePath, undoChange, writeWorkspaceText } from '../src/core/workspace.js';
+import { beginRunChanges, finishRunChanges } from '../src/core/run-changes.js';
 
 const testBase = path.resolve('tests');
 const roots: string[] = [];
@@ -142,5 +143,54 @@ describe('tool validation and context budget', () => {
     expect((response.details as { fullOutput: string }).fullOutput).toContain('下一页从 201 行');
     await tools.find(t => t.name === 'write_file')!.execute('write', { path: 'created.ts', content: '中文' }, undefined, undefined, {} as never);
     expect(starts).toBe(2); expect(events).toEqual([{ type: 'changes_updated', runId: f.runId, sessionId: f.sessionId }]);
+  });
+});
+
+describe('authorized external resources and read-only attachments', () => {
+  it('asks for external writes and independently journals same-named external and project files', async () => {
+    const f = await fixture(); await fs.writeFile(path.join(f.outside, 'same.txt'), 'outside original'); await fs.writeFile(path.join(f.projectPath, 'same.txt'), 'project original');
+    await fs.mkdir(f.dataDir, { recursive: true });
+    await beginRunChanges(f.dataDir, f.sessionId, f.runId, f.projectPath);
+    const approvals: any[] = []; const tools = createWorkspaceTools({ ...f, approvalMode: 'auto', maxResultChars: 1000, emit: () => {}, requestApproval: async a => { approvals.push(a); return true; } });
+    const write = tools.find(t => t.name === 'write_file')!;
+    await write.execute('external', { path: path.join(f.outside, 'same.txt'), content: 'outside agent' }, undefined, undefined, {} as never);
+    await write.execute('project', { path: 'same.txt', content: 'project agent' }, undefined, undefined, {} as never);
+    expect(approvals).toHaveLength(1); expect(approvals[0]).toMatchObject({ kind: 'write', resource: path.join(f.outside, 'same.txt'), toolCallId: 'external' });
+    const changes = await getChanges(f.dataDir, f.sessionId); expect(changes).toHaveLength(2);
+    expect(changes.find(c => path.isAbsolute(c.path))).toMatchObject({ before: 'outside original', after: 'outside agent', conflict: false });
+    const summary = await finishRunChanges(f.dataDir, f.sessionId, f.runId, f.projectPath);
+    const external = summary.changes.find(c => path.isAbsolute(c.path)); expect(external).toMatchObject({ kind: 'modified' }); expect(external?.conflict).toBeFalsy();
+    await undoChange(f.dataDir, f.sessionId, path.join(f.outside, 'same.txt'));
+    expect(await fs.readFile(path.join(f.outside, 'same.txt'), 'utf8')).toBe('outside original');
+    expect(await fs.readFile(path.join(f.projectPath, 'same.txt'), 'utf8')).toBe('project agent');
+    await expect(undoChange(f.dataDir, f.sessionId, path.join(f.outside, 'unknown.txt'))).rejects.toThrow('没有找到');
+  });
+  it('denies an external write before changing files and full access avoids prompts', async () => {
+    const f = await fixture(); const target = path.join(f.outside, 'new.txt'); let calls = 0;
+    const denied = createWorkspaceTools({ ...f, maxResultChars: 500, emit: () => {}, requestApproval: async () => { calls++; return false; } }).find(t => t.name === 'write_file')!;
+    await expect(denied.execute('denied', { path: target, content: 'bad' }, undefined, undefined, {} as never)).rejects.toThrow('拒绝'); expect(calls).toBe(1);
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    const allowed = createWorkspaceTools({ ...f, approvalMode: 'full', maxResultChars: 500, emit: () => {}, requestApproval: async () => { throw new Error('must not ask'); } }).find(t => t.name === 'write_file')!;
+    await allowed.execute('allowed', { path: target, content: 'ok' }, undefined, undefined, {} as never); expect(await fs.readFile(target, 'utf8')).toBe('ok');
+  });
+  it('reads projectless attachments but exposes no mutation tools and rejects attachment escapes', async () => {
+    const f = await fixture(); await fs.writeFile(path.join(f.outside, 'reference.txt'), 'reference material');
+    const attachments = [{ id: 'folder', name: 'reference', kind: 'folder' as const, size: 0, storagePath: f.outside }];
+    const ctx = { ...f, projectPath: '', attachments, maxResultChars: 1000, emit: () => {}, requestApproval: async () => { throw new Error('attachment must not ask'); } };
+    const tools = createWorkspaceTools(ctx); expect(tools.some(t => ['write_file', 'edit_file', 'powershell'].includes(t.name))).toBe(false);
+    const read = tools.find(t => t.name === 'read_file')!;
+    const output = await read.execute('read', { path: 'attachment:folder/reference.txt' }, undefined, undefined, {} as never); expect(JSON.stringify(output)).toContain('reference material');
+    await expect(read.execute('escape', { path: 'attachment:folder/../project/a.txt' }, undefined, undefined, {} as never)).rejects.toThrow('路径穿越');
+    await expect(read.execute('absolute', { path: path.join(f.outside, 'reference.txt') }, undefined, undefined, {} as never)).rejects.toThrow('未指定工作区');
+    const full = createWorkspaceTools({ ...ctx, projectPath: f.projectPath, approvalMode: 'full' });
+    for (const pathname of ['attachment:folder/reference.txt', path.join(f.outside, 'reference.txt')]) await expect(full.find(t => t.name === 'write_file')!.execute('write', { path: pathname, content: 'bad' }, undefined, undefined, {} as never)).rejects.toThrow('只读');
+  });
+  it('keeps private app data inaccessible even in full access and omits writes in plan mode', async () => {
+    const f = await fixture(); const dataDir = path.join(f.projectPath, 'private-data'); await fs.mkdir(dataDir); await fs.writeFile(path.join(dataDir, 'key.txt'), 'private-secret');
+    const ctx = { ...f, dataDir, approvalMode: 'full' as const, maxResultChars: 1000, emit: () => {}, requestApproval: async () => true };
+    const tools = createWorkspaceTools(ctx); const read = tools.find(t => t.name === 'read_file')!;
+    await expect(read.execute('private', { path: 'private-data/key.txt' }, undefined, undefined, {} as never)).rejects.toThrow('私有数据');
+    const search = await tools.find(t => t.name === 'search')!.execute('search', { query: 'private-secret' }, undefined, undefined, {} as never); expect(JSON.stringify(search)).not.toContain('private-secret');
+    const plan = createWorkspaceTools({ ...ctx, workMode: 'plan' }); expect(plan.some(t => ['write_file', 'edit_file', 'powershell'].includes(t.name))).toBe(false); expect(plan.some(t => t.name === 'ask_question')).toBe(true); expect(plan.some(t => t.name === 'propose_plan')).toBe(true);
   });
 });

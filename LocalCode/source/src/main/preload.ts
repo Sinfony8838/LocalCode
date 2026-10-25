@@ -8,6 +8,8 @@ const api: LocalCodeApi = {
   createSession: id => invoke('createSession', id), openSession: id => invoke('openSession', id), renameSession: input => invoke('renameSession', input),
   moveSession: input => invoke('moveSession', input), setProjectPinned: input => invoke('setProjectPinned', input), setSidebar: input => invoke('setSidebar', input),
   send: input => invoke('send', input), stop: id => invoke('stop', id), approve: input => invoke('approve', input),
+  pickAttachments: input => invoke('pickAttachments', input), importAttachments: input => invoke('importAttachments', input),
+  answerQuestion: input => invoke('answerQuestion', input), acceptPlan: input => invoke('acceptPlan', input), controlGoal: input => invoke('controlGoal', input),
   listFiles: input => invoke('listFiles', input), readFile: input => invoke('readFile', input), changes: id => invoke('changes', id), undo: input => invoke('undo', input),
   previewCheckpoint: input => invoke('previewCheckpoint', input), checkpoint: input => invoke('checkpoint', input),
   artifactInfo: input => invoke('artifactInfo', input), artifactAction: input => invoke('artifactAction', input),

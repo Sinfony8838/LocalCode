@@ -29,7 +29,7 @@ describe('approval boundary', () => {
     const f = await fixture(); const seen: unknown[] = []; const command = "Set-Content -LiteralPath 'denied.txt' -Value 'BAD'";
     const tool = createWorkspaceTools({ ...f, requestApproval: async input => { seen.push(input); return false; } }).find(t => t.name === 'powershell')!;
     await expect(tool.execute('denied', { command }, undefined, undefined, {} as never)).rejects.toThrow(/拒绝/);
-    expect(seen).toEqual([{ command, cwd: await fs.realpath(f.projectPath) }]);
+    expect(seen).toEqual([expect.objectContaining({ command, cwd: await fs.realpath(f.projectPath), kind: 'command', toolCallId: 'denied' })]);
     await expect(fs.stat(path.join(f.projectPath, 'denied.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(path.join(f.dataDir, 'owned-commands'))).rejects.toMatchObject({ code: 'ENOENT' });
   });

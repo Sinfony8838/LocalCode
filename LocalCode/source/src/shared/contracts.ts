@@ -1,6 +1,17 @@
 import type { ArtifactInfo, ArtifactAction, ArtifactInputKind } from './artifacts';
+export type RunStatus = 'idle' | 'running' | 'awaiting_approval' | 'awaiting_input' | 'completed' | 'failed' | 'interrupted';
+export type ApprovalMode = 'ask' | 'auto' | 'full';
+export type WorkMode = 'execute' | 'plan';
+export interface AttachmentInfo { id: string; name: string; kind: 'image' | 'text' | 'folder'; size: number; mimeType?: string; previewUrl?: string }
+/** Private worker metadata. Never return storagePath through renderer IPC. */
+export interface AttachmentResource extends AttachmentInfo { storagePath: string }
+export interface QuestionItem { header: string; question: string; options: { label: string; description?: string }[]; multiple?: boolean }
+export interface QuestionRecord { id: string; runId: string; sessionId: string; questions: QuestionItem[] }
+export interface PlanRecord { id: string; runId: string; text: string; status: 'proposed' | 'accepted' }
+export type GoalStatus = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'usage_limited' | 'complete';
+export interface GoalState { id: string; objective: string; status: GoalStatus; budgetMs: number; activeMs: number; reason?: string; updatedAt: string }
+export interface SendInput { sessionId: string; prompt: string; providerId: string; modelId?: string; draftKey?: string; attachmentIds?: string[]; approvalMode?: ApprovalMode; workMode?: WorkMode; goal?: { objective: string; budgetMs: number } }
 import type { AppLocale } from './i18n';
-export type RunStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'interrupted';
 export type Theme = 'light' | 'dark';
 export const DEFAULT_FONT_SIZE = 14;
 export const MIN_FONT_SIZE = 12;
@@ -10,14 +21,14 @@ export interface SidebarPreferences { pinnedCollapsed: boolean; projectsCollapse
 export const DEFAULT_SIDEBAR: SidebarPreferences = { pinnedCollapsed: false, projectsCollapsed: false, recentCollapsed: false, collapsedProjects: [] };
 export interface MessagePart { index: number; type: 'text' | 'thinking'; text: string; startedAt: string; endedAt?: string; state: 'streaming' | 'completed' | 'interrupted' }
 export interface RunProgress { phase: 'waiting' | 'thinking' | 'output' | 'tool' | 'queued' | 'retry'; since: string; retryAt?: number; attempt?: number }
-export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; runId?: string; partial?: boolean; parts?: MessagePart[] }
+export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; runId?: string; partial?: boolean; parts?: MessagePart[]; attachments?: AttachmentInfo[]; automatic?: boolean }
 export interface RunFileChange { path: string; kind: 'created' | 'modified' | 'deleted'; additions: number | null; deletions: number | null; source: 'file_tool' | 'workspace'; conflict?: boolean }
 export interface RunSummary { runId: string; startedAt: string; endedAt?: string; durationMs?: number; status: 'running' | 'completed' | 'failed' | 'interrupted'; finalMessageId?: string; changes: RunFileChange[]; changeScope: 'workspace_snapshot' | 'file_tools'; coverageNote?: string; changesError?: string }
 export interface ToolRecord { id: string; runId: string; name: string; args: unknown; result?: string; isError?: boolean; status: 'running' | 'completed' | 'failed'; createdAt: string }
-export interface Approval { id: string; runId: string; sessionId: string; command: string; cwd: string }
-export interface SessionView { id: string; projectId: string | null; title: string; createdAt: string; updatedAt: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress }
-export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean }
-export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; ollamaMode?: 'managed' | 'existing' }
+export interface Approval { id: string; runId: string; sessionId: string; command: string; cwd: string; kind?: 'command' | 'read' | 'write'; resource?: string; preview?: string; permissionKey?: string; toolCallId?: string; reason?: string }
+export interface SessionView { id: string; projectId: string | null; title: string; createdAt: string; updatedAt: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress; approvalMode?: ApprovalMode; workMode?: WorkMode; question?: QuestionRecord; plan?: PlanRecord; goal?: GoalState }
+export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean; supportsImages?: boolean }
+export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; supportsImages?: boolean; ollamaMode?: 'managed' | 'existing' }
 export interface ProviderSecret extends ProviderConfig { apiKey: string }
 export interface AppSettings { theme: Theme; fontSize: number; locale: AppLocale; defaultProviderId: string; providers: ProviderConfig[]; sidebar?: SidebarPreferences }
 export interface LocalModelProbe { baseUrl: string; model: string; contextWindow: number; ollamaMode?: 'managed' | 'existing' }
@@ -40,14 +51,18 @@ export type AgentEvent = { runId: string; sessionId: string; recordedAt?: string
  | { type: 'tool_result'; toolCallId: string; result: string; isError: boolean }
  | { type: 'approval'; approval: Approval }
  | { type: 'approval_resolved'; approvalId: string }
+ | { type: 'question'; question: QuestionRecord }
+ | { type: 'question_resolved'; questionId: string }
+ | { type: 'plan'; plan: PlanRecord }
+ | { type: 'goal_update'; goalId: string; status: 'complete' | 'blocked' | 'paused'; reason: string }
  | { type: 'changes_updated' }
  | { type: 'session_file'; file: string }
  | { type: 'error'; message: string }
  | { type: 'settled'; status: 'completed' | 'failed' | 'interrupted'; error?: string; summary?: RunSummary }
  | { type: 'notice'; message: string }
 );
-export interface RunRequest { type: 'run'; runId: string; sessionId: string; projectPath: string; dataDir: string; piFile?: string; provider: ProviderSecret; prompt: string; locale?: AppLocale }
-export type WorkerCommand = RunRequest | { type: 'approve'; runId: string; approvalId: string; allow: boolean } | { type: 'abort'; runId: string } | { type: 'shutdown' };
+export interface RunRequest { type: 'run'; runId: string; sessionId: string; projectPath: string; dataDir: string; piFile?: string; provider: ProviderSecret; prompt: string; approvalMode?: ApprovalMode; workMode?: WorkMode; grants?: string[]; attachments?: AttachmentResource[]; newAttachmentIds?: string[]; goal?: { id: string; objective: string }; automatic?: boolean; locale?: AppLocale }
+export type WorkerCommand = RunRequest | { type: 'approve'; runId: string; approvalId: string; allow: boolean; scope?: 'once' | 'session' } | { type: 'answer'; runId: string; questionId: string; answers: string[][] | null } | { type: 'abort'; runId: string } | { type: 'shutdown' };
 export type TransportMessage = { runId: string; sessionId: string; requestId: string } & ({ type: 'request_acquire' } | { type: 'request_release'; cooldownUntil?: number } | { type: 'request_cancel' });
 export type TransportGrant = { type: 'request_grant'; runId: string; requestId: string };
 export type AppEvent = AgentEvent | { type: 'state_changed' };
@@ -61,9 +76,14 @@ export interface LocalCodeApi {
  setSidebar(input: Partial<SidebarPreferences>): Promise<SidebarPreferences>;
  openSession(sessionId: string): Promise<SessionView>;
  renameSession(input: {sessionId: string; title: string}): Promise<SessionView>;
- send(input: {sessionId: string; prompt: string; providerId: string; modelId?: string}): Promise<{runId: string}>;
+ send(input: SendInput): Promise<{runId: string}>;
  stop(sessionId: string): Promise<void>;
- approve(input: {runId: string; approvalId: string; allow: boolean}): Promise<void>;
+ approve(input: {runId: string; approvalId: string; allow: boolean; scope?: 'once' | 'session'}): Promise<void>;
+ pickAttachments(input: {draftKey: string; folders?: boolean}): Promise<AttachmentInfo[]>;
+ importAttachments(input: {draftKey: string; files: {name: string; data: string}[]}): Promise<AttachmentInfo[]>;
+ answerQuestion(input: {sessionId: string; runId: string; questionId: string; answers: string[][] | null}): Promise<void>;
+ acceptPlan(input: {sessionId: string; planId: string; providerId: string; modelId?: string}): Promise<{runId: string}>;
+ controlGoal(input: {sessionId: string; goalId: string; action: 'pause' | 'resume' | 'clear' | 'budget'; budgetMs?: number; providerId?: string; modelId?: string}): Promise<void>;
  listFiles(input: {projectId: string; directory?: string}): Promise<FileEntry[]>;
  readFile(input: {projectId: string; path: string}): Promise<FileView>;
  artifactInfo(input: {projectId: string; path: string; inputKind?: ArtifactInputKind}): Promise<ArtifactInfo>;

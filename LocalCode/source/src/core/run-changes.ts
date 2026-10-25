@@ -137,11 +137,11 @@ export async function finishRunChanges(dataDir: string, sessionId: string, runId
         continue;
       }
       let after: string | null = record.after; let conflict = record.pending;
-      try { after = await readWorkspaceText(projectPath, record.path); conflict ||= after !== record.after; }
+      try { after = await readWorkspaceText(record.projectPath, record.relativePath); conflict ||= after !== record.after; }
       catch (error: any) { if (error.code === 'ENOENT') after = null; else conflict = true; }
       // Absence proves creation only inside the automatic scan's actual scope.
       // Explicit tools can edit existing ignored files, so retain their true before bytes.
-      const before = baseline?.complete && !excludedFromScan(record.path) && !wasSkipped(record.path) ? null : record.before;
+      const before = !path.isAbsolute(record.path) && baseline?.complete && !excludedFromScan(record.path) && !wasSkipped(record.path) ? null : record.before;
       const observed = change(record.path, before, after, 'file_tool', conflict);
       if (observed) changes.set(key, observed); else changes.delete(key);
     }

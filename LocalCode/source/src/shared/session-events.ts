@@ -3,7 +3,7 @@ import type { AgentEvent, SessionView } from './contracts';
 /** Shared immutable reducer: disk snapshots and live UI must interpret events identically. */
 export function reduceAgentEvent(session: SessionView, event: AgentEvent): SessionView {
   if (session.id !== event.sessionId) return session;
-  if (session.runId && session.runId !== event.runId && !(event.type === 'status' && event.status === 'running' && !['running', 'awaiting_approval'].includes(session.status))) return session;
+  if (session.runId && session.runId !== event.runId && !(event.type === 'status' && event.status === 'running' && !['running', 'awaiting_approval', 'awaiting_input'].includes(session.status))) return session;
   const at = event.recordedAt ?? new Date().toISOString();
   // A settled round is immutable. Late deltas, duplicate settlement and stale approvals
   // must never reopen it or replace its frozen file summary.
@@ -56,9 +56,14 @@ export function reduceAgentEvent(session: SessionView, event: AgentEvent): Sessi
     }
     case 'approval': next.approval = event.approval; next.status = 'awaiting_approval'; break;
     case 'approval_resolved': if (next.approval?.id === event.approvalId) { delete next.approval; next.status = 'running'; } break;
+    case 'question': next.question = event.question; next.status = 'awaiting_input'; break;
+    case 'question_resolved': if (next.question?.id === event.questionId) { delete next.question; next.status = 'running'; } break;
+    case 'plan': next.plan = event.plan; break;
+    // Goal transitions are committed by the main process after run settlement.
+    case 'goal_update': break;
     case 'error': next.error = event.message; break;
     case 'settled':
-      next.status = event.status; next.error = event.error ?? next.error; delete next.approval; delete next.progress;
+      next.status = event.status; next.error = event.error ?? next.error; delete next.approval; delete next.progress; delete next.question;
       if (event.summary?.runId === event.runId && event.summary.status === event.status) {
         next.runs = [...(next.runs ?? []).filter(run => run.runId !== event.runId), event.summary];
       } else {

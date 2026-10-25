@@ -75,6 +75,13 @@ async function assertLocale(locale) {
   // updates and becomes visible when the user expands it again.
   assert.equal(await page.locator('.new-task-button').textContent(), text.newTask);
   await page.getByLabel(text.input, { exact: true }).waitFor();
+  const modes = {
+    'zh-CN': ['审批模式','请求批准','完全访问权限'],
+    en: ['Approval mode','Ask for approval','Full access'],
+    ja: ['承認モード','承認を求める','フルアクセス'],
+    ko: ['승인 모드','승인 요청','전체 액세스'],
+  }[locale];
+  assert.equal(await page.getByRole('button',{name:modes[0],exact:true}).count(),1);
   assert.equal((await page.evaluate(() => window.localcode.bootstrap())).settings.locale, locale);
   assert.equal(await pet.locator('.lc-pet-balloon').innerText(), text.balloon);
   assert.equal(await pet.locator('.lc-pet-toolbar button').first().getAttribute('aria-label'), text.open);
@@ -101,6 +108,9 @@ try {
     await page.locator('.settings-nav button').nth(3).click();
     await page.getByRole('region', { name: text.pets, exact: true }).waitFor();
     await page.getByRole('button', { name: text.close, exact: true }).click();
+    await page.getByRole('button',{name: {'zh-CN':'审批模式',en:'Approval mode',ja:'承認モード',ko:'승인 모드'}[locale],exact:true}).click();
+    await page.getByRole('menuitemradio').filter({hasText:{'zh-CN':'完全访问权限',en:'Full access',ja:'フルアクセス',ko:'전체 액세스'}[locale]}).waitFor();
+    await page.keyboard.press('Escape');
     const nav = navigation[locale];
     await page.getByRole('button', { name: nav.home, exact: true }).click();
     assert.equal(await page.locator('.workspace-heading h1').innerText(), nav.heading);

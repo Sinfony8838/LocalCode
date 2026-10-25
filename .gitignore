@@ -8,6 +8,8 @@
 **/app/
 **/models/
 **/runtime/
+!LocalCode/source/third_party/codex/codex-rs/state/src/runtime/
+!LocalCode/source/third_party/codex/codex-rs/state/src/runtime/goals.rs
 **/profile/
 **/temp/
 **/downloads/

@@ -1,5 +1,7 @@
 # Third-party notices
 
+Approval rules, strict PowerShell parsing, and goal lifecycle adaptations introduced in 0.2.0 have additional MIT and Apache-2.0 notices. See [the detailed source notices](LocalCode/source/THIRD_PARTY_NOTICES.md); fixed upstream reference copies and their original LICENSE/NOTICE files are retained under `LocalCode/source/third_party/`. No private desktop artwork is added by this feature.
+
 The MIT license at the repository root covers LocalCode source code and these deployment helpers. It does not relicense third-party dependencies, models, trademarks, or user-imported artwork.
 
 | Component | Source | License / handling |

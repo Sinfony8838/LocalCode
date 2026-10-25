@@ -5,7 +5,7 @@ import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Loade
 import type { Project, SessionView, SidebarPreferences } from '../shared/contracts';
 import './task-navigation.css';
 
-const busy = (session: SessionView) => ['running', 'awaiting_approval'].includes(session.status);
+const busy = (session: SessionView) => ['running', 'awaiting_approval', 'awaiting_input'].includes(session.status);
 const recent = (sessions: SessionView[]) => [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 type MenuTarget = { project: Project; session?: never } | { session: SessionView; project?: never };
 

@@ -64,7 +64,7 @@ try {
   await select(a.id); await page.getByRole('button', { name: '停止任务', exact: true }).click();
   await session(a.id, 'interrupted');
   assert.equal((await session(b.id)).approval.id, b.approval.id);
-  await select(b.id); await page.getByRole('button', { name: '允许执行', exact: true }).click();
+  await select(b.id); await page.getByRole('button', { name: '允许这一次', exact: true }).click();
   await poll(async () => fs.access(path.join(project, 'began.txt')).then(() => true, () => false), 'B command began');
   checks.push('A and B run concurrently; duplicate A rejected; cross-run approval rejected; stopping A preserves B approval');
   const owned = path.join(root, 'data/owned-commands');

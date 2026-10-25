@@ -15,8 +15,8 @@ const checks = [], errors = [], requests = [];
 let tags = [{ name: 'tiny:latest' }, { name: 'coder:latest' }];
 const server = http.createServer((req, res) => {
   requests.push({ method: req.method, url: req.url });
-  const data = req.url === '/api/tags' ? { models: tags } : req.url === '/api/version' ? { version: 'fixture-1' } : req.url === '/api/ps' ? { models: [] } : undefined;
-  res.writeHead(req.method === 'GET' && data ? 200 : 405, { 'content-type': 'application/json' });
+  const data = req.url === '/api/tags' ? { models: tags } : req.url === '/api/version' ? { version: 'fixture-1' } : req.url === '/api/ps' ? { models: [] } : req.url === '/api/show' ? {capabilities:['completion','tools']} : undefined;
+  res.writeHead(data && (req.method === 'GET' || req.method === 'POST' && req.url === '/api/show') ? 200 : 405, { 'content-type': 'application/json' });
   res.end(JSON.stringify(data ?? { error: 'Inference is forbidden in this fixture' }));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -101,10 +101,10 @@ try {
   await page.getByText('云端模式 · 无需 Ollama', { exact: true }).waitFor();
   assert.equal(await page.locator('.model-setup-banner').count(), 0);
   assert(!JSON.stringify(await page.evaluate(() => window.localcode.bootstrap())).includes('fixture-only-not-a-real-key'));
-  assert(requests.every(r => r.method === 'GET' && ['/api/tags', '/api/version', '/api/ps'].includes(r.url)));
+  assert(requests.every(r => r.method === 'GET' && ['/api/tags', '/api/version', '/api/ps'].includes(r.url) || r.method === 'POST' && r.url === '/api/show'));
   assert.deepEqual(errors, []);
   await page.screenshot({ path: path.join(root, 'cloud-without-local.png') });
-  checks.push('cloud mode removes local prerequisite warning; credentials remain private; fixture received only bounded read-only discovery GETs');
+  checks.push('cloud mode removes local prerequisite warning; credentials remain private; fixture received only bounded read-only discovery GETs and metadata-only api/show');
   await fs.writeFile(path.join(root, 'report.json'), JSON.stringify({ checks, requestCount: requests.length, errors }, null, 2));
   console.log(JSON.stringify({ root, checks }, null, 2));
 } finally { await app?.close().catch(() => {}); await new Promise(resolve => server.close(resolve)); await new Promise(resolve => offline.close(resolve)); }

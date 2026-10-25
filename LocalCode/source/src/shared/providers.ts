@@ -9,7 +9,7 @@ export function selectProviderModel(provider: ProviderConfig, modelId?: string):
   if (provider.enabled === false) throw new Error('此供应商已停用，请在模型设置中启用。');
   const model = providerModels(provider).find(model => model.id === (modelId ?? provider.model));
   if (!model || !model.enabled) throw new Error('模型不存在或已停用，请重新选择模型。');
-  return { ...provider, model: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens };
+  return { ...provider, model: model.id, contextWindow: model.contextWindow, maxTokens: model.maxTokens, supportsImages: model.supportsImages ?? provider.supportsImages ?? false };
 }
 
 export const MANAGED_OLLAMA_URL = 'http://127.0.0.1:11434/v1';

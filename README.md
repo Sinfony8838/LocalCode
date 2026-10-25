@@ -2,6 +2,8 @@
 
 # LocalCode
 
+Version 0.2.0 adds three approval modes, image/text/read-only-folder attachments, interactive planning, and persistent goals for external models. Goals default to two hours of active work with pause/resume and editable budgets; local Ollama goals are disabled. External models no longer have a fixed twelve-tool limit. The neutral light/dark UI preserves the four interface languages, model setup, and checkpoints. See the [usage guide](LocalCode/source/docs/AGENT_MODES.md) and [implementation provenance](LocalCode/source/THIRD_PARTY_NOTICES.md). These source changes do not lift the release hold described below.
+
 **English** | [简体中文](README.zh-CN.md)
 
 A local-first coding desktop for Windows: Electron + React + TypeScript, a separate agent worker for each conversation, and Ollama inference on your own computer. Read and edit project files, review changes, approve terminal commands, and resume saved conversations in Simplified Chinese, English, Japanese, or Korean. Optional external providers support OpenAI Chat Completions, Responses, and Anthropic Messages.
