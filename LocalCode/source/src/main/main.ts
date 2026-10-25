@@ -1,0 +1,300 @@
+import { app, BrowserWindow, dialog, ipcMain, protocol, safeStorage, screen, shell, utilityProcess, type UtilityProcess } from 'electron';
+import fs from 'node:fs/promises';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { z } from 'zod';
+import { Store } from './store';
+import { RequestScheduler } from './request-scheduler';
+import { createHash } from 'node:crypto';
+import { providerSchema, testConnection } from './providers';
+import { selectProviderModel } from '../shared/providers';
+import { PetController } from './pets';
+import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange } from '../core/workspace';
+import { cleanupOwnedCommands } from '../core/command';
+import type { AgentEvent, AppEvent, ModelHealth, ProviderSecret, WorkerCommand, TransportMessage, TransportGrant } from '../shared/contracts';
+
+const home = path.resolve(process.env.LOCALCODE_HOME || app.getPath('userData'));
+const dataDir = path.join(home, 'data');
+const cacheDir = path.join(home, 'cache');
+for (const folder of [dataDir, cacheDir, path.join(home, 'logs'), path.join(dataDir, 'electron'), path.join(cacheDir, 'chromium')]) mkdirSync(folder, { recursive: true });
+app.setPath('userData', path.join(dataDir, 'electron'));
+app.setPath('sessionData', path.join(cacheDir, 'chromium'));
+app.setPath('crashDumps', path.join(cacheDir, 'crashes'));
+app.setAppLogsPath(path.join(home, 'logs'));
+process.env.TEMP = cacheDir; process.env.TMP = cacheDir;
+protocol.registerSchemesAsPrivileged([{ scheme: 'localcode', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+const store = new Store(dataDir);
+let window: BrowserWindow | undefined;
+const pets = new PetController(home, __dirname, () => window, () => { window?.restore(); window?.show(); window?.focus(); });
+type ActiveRun = { runId: string; sessionId: string; apiKey?: string; child: UtilityProcess; requestGroup: string };
+const requestScheduler = new RequestScheduler();
+const runs = new Map<string, ActiveRun>();
+const workers = new Map<string, UtilityProcess>();
+const starting = new Map<string, { cancelled: boolean }>();
+const recovering = new Map<string, Promise<void>>();
+let quitting = false;
+let quitReady = false;
+let eventQueue = Promise.resolve();
+const stopping = new Map<string, Promise<void>>();
+let cleanupQueue = Promise.resolve();
+function cleanupCommands(workerPid?: number) {
+  cleanupQueue = cleanupQueue.catch(() => {}).then(() => cleanupOwnedCommands(dataDir, workerPid));
+  return cleanupQueue;
+}
+const log = createWriteStream(path.join(home, 'logs', 'desktop.log'), { flags: 'a' });
+const id = z.string().uuid();
+const providerId = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
+const relPath = z.string().min(1).max(2048);
+const emit = (event: AppEvent) => { if (window && !window.isDestroyed()) window.webContents.send('localcode:event', event); };
+const post = (run: ActiveRun, command: WorkerCommand) => run.child.postMessage(command);
+
+async function health(): Promise<ModelHealth> {
+  const local = store.provider('local');
+  try {
+    const [v, tags, ps] = await Promise.all([
+      fetch('http://127.0.0.1:11434/api/version', { signal: AbortSignal.timeout(4000) }).then(r => r.json()),
+      fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(4000) }).then(r => r.json()),
+      fetch('http://127.0.0.1:11434/api/ps', { signal: AbortSignal.timeout(4000) }).then(r => r.json()),
+    ]);
+    const found = tags.models?.some((m: any) => m.name === local.model);
+    const loaded = ps.models?.find((m: any) => m.name === local.model);
+    const gpuPercent = loaded?.size > 0 ? Math.round(loaded.size_vram / loaded.size * 100) : undefined;
+    return { online: true, modelAvailable: !!found, model: local.model, contextWindow: local.contextWindow, version: v.version, gpuPercent,
+      message: !found ? '本地 Agent 模型尚未就绪。请检查部署记录。' : gpuPercent === 0 ? '当前模型以 CPU 运行，响应会明显变慢。请检查独立显卡和显卡模式。' : undefined };
+  } catch { return { online: false, modelAvailable: false, model: local.model, contextWindow: local.contextWindow, message: 'Ollama 未连接。请运行项目中的 Ollama/Start.cmd 后重试。' }; }
+}
+async function startOllamaIfNeeded() {
+  if (process.env.LOCALCODE_SKIP_OLLAMA_START === '1' || (await health()).online) return;
+  const start = process.env.LOCALCODE_OLLAMA_START || path.resolve(home, '../Ollama/Start.ps1');
+  try {
+    await fs.access(start);
+    const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const child = spawn(executable, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', start], { windowsHide: true, stdio: 'ignore', cwd: path.dirname(start) });
+    child.on('error', error => log.write(`Ollama start: ${error.message}\n`));
+    child.unref();
+  } catch (e: any) { log.write(`Ollama unavailable: ${e.message}\n`); }
+}
+async function processEvent(raw: AgentEvent) {
+  const active = runs.get(raw.sessionId);
+  if (!active || raw.runId !== active.runId || raw.sessionId !== active.sessionId) return;
+  let event = raw;
+  if (active.apiKey && active.apiKey.length >= 6) event = JSON.parse(JSON.stringify(raw).split(active.apiKey).join('[密钥已隐藏]'));
+  // The worker emits settled only after inference, approvals and commands are cleaned up.
+  // Release the run before publishing its completed status into the in-memory store.
+  if (event.type === 'settled') { requestScheduler.cancel(active.runId); runs.delete(event.sessionId); }
+  await store.event(event);
+  if (['status', 'settled', 'approval', 'approval_resolved'].includes(event.type)) {
+    const sessions = store.sessions();
+    const other = sessions.find(session => session.status === 'awaiting_approval') || sessions.find(session => session.status === 'running');
+    pets.onAgentEvent(other ? { type: 'status', runId: other.runId!, sessionId: other.id, status: other.status } : event);
+  }
+  emit(event);
+  // Each worker owns exactly one run, including its commands and credentials.
+  if (event.type === 'settled') active.child.kill();
+}
+function createWorker(sessionId: string, apiKey?: string) {
+  const child = utilityProcess.fork(path.join(__dirname, 'worker.mjs'), [], { serviceName: 'LocalCode Agent', stdio: 'pipe', env: { ...process.env, LOCALCODE_DATA_DIR: dataDir, TEMP: cacheDir, TMP: cacheDir } });
+  workers.set(sessionId, child);
+  let workerPid: number | undefined;
+  child.once('spawn', () => { workerPid = child.pid; });
+  const write = (buffer: Buffer) => { let text = buffer.toString(); if (apiKey && apiKey.length >= 6) text = text.split(apiKey).join('[密钥已隐藏]'); log.write(text); };
+  child.stdout?.on('data', write); child.stderr?.on('data', write);
+  child.on('message', (event: AgentEvent | TransportMessage) => {
+    const run = runs.get(sessionId);
+    if (!run || run.child !== child || event.sessionId !== sessionId || event.runId !== run.runId) return;
+    // Permits must never await inside the event persistence queue: the holder needs it too.
+    if (event.type === 'request_acquire') {
+      requestScheduler.acquire(run.requestGroup, run.runId, event.requestId, () => {
+        if (runs.get(sessionId) === run) child.postMessage({ type: 'request_grant', runId: run.runId, requestId: event.requestId } satisfies TransportGrant);
+        else requestScheduler.cancel(run.runId);
+      }); return;
+    }
+    if (event.type === 'request_release') { requestScheduler.release(run.requestGroup, run.runId, event.requestId, Number.isFinite(event.cooldownUntil) ? event.cooldownUntil : 0); return; }
+    if (event.type === 'request_cancel') { requestScheduler.cancel(run.runId, event.requestId); return; }
+    eventQueue = eventQueue.then(() => { if (runs.get(sessionId)?.child === child) return processEvent(event); }).catch(error => { log.write(`Agent event: ${error.message}\n`); });
+  });
+  child.on('exit', code => {
+    const active = runs.get(sessionId);
+    const ended = active?.child === child ? { runId: active.runId, sessionId: active.sessionId } : undefined;
+    if (ended) requestScheduler.cancel(ended.runId);
+    if (workers.get(sessionId) === child) workers.delete(sessionId);
+    eventQueue = eventQueue.then(async () => {
+      // Never sweep another live session's command ownership records.
+      if (workerPid) await cleanupCommands(workerPid);
+      if (ended && runs.get(sessionId)?.child === child && runs.get(sessionId)?.runId === ended.runId) await processEvent({ type: 'settled', ...ended, status: 'interrupted', error: `Agent 进程退出（${code}），未自动重放任何命令。` });
+    }).catch(error => { log.write(`Worker exit: ${error.message}\n`); });
+    const recovery = eventQueue;
+    recovering.set(sessionId, recovery);
+    void recovery.finally(() => { if (recovering.get(sessionId) === recovery) recovering.delete(sessionId); });
+  });
+  return child;
+}
+async function stopRun(sessionId: string) {
+  const pending = starting.get(sessionId);
+  if (pending) {
+    pending.cancelled = true;
+    while (starting.get(sessionId) === pending) await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const active = runs.get(sessionId);
+  if (!active || active.sessionId !== sessionId) return;
+  const runId = active.runId;
+  const existing = stopping.get(runId);
+  if (existing) return existing;
+  const operation = stopRunOnce(sessionId);
+  stopping.set(runId, operation);
+  try { await operation; } finally { stopping.delete(runId); }
+}
+async function stopRunOnce(sessionId: string) {
+  const active = runs.get(sessionId);
+  if (!active || active.sessionId !== sessionId) return;
+  const runId = active.runId;
+  post(active, { type: 'abort', runId });
+  const until = Date.now() + 15000;
+  while (runs.get(sessionId)?.runId === runId && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 100));
+  if (runs.get(sessionId)?.runId === runId) {
+    const stoppedWorker = active.child;
+    if (stoppedWorker) {
+      const exited = new Promise<void>(resolve => stoppedWorker.once('exit', () => resolve()));
+      stoppedWorker.kill();
+      await exited;
+      await recovering.get(sessionId);
+    }
+    await processEvent({ type: 'settled', runId, sessionId, status: 'interrupted', error: '任务已强制停止。未自动重试命令。' });
+  }
+}
+
+const schemas: Record<string, z.ZodType> = {
+  bootstrap: z.undefined(), pickProject: z.undefined(), createSession: id, openSession: id,
+  renameSession: z.object({ sessionId: id, title: z.string().trim().min(1).max(100) }).strict(),
+  send: z.object({ sessionId: id, prompt: z.string().trim().min(1).max(30000), providerId, modelId: z.string().min(1).max(200).optional() }).strict(), stop: id,
+  approve: z.object({ runId: id, approvalId: z.string().min(1).max(200), allow: z.boolean() }).strict(),
+  listFiles: z.object({ projectId: id, directory: z.string().max(2048).optional() }).strict(), readFile: z.object({ projectId: id, path: relPath }).strict(),
+  changes: id, undo: z.object({ sessionId: id, path: relPath }).strict(),
+  saveProvider: providerSchema,
+  deleteProvider: providerId,
+  testProvider: z.object({ providerId, modelId: z.string().min(1).max(200).optional() }).strict(),
+  setTheme: z.enum(['light', 'dark']), setFontSize: z.number().int().min(12).max(20), health: z.undefined(), openDataFolder: z.undefined(),
+};
+async function invoke(method: string, arg: any) {
+  switch (method) {
+    case 'bootstrap': { const currentHealth = await health(); await eventQueue; return { projects: store.projects(), sessions: store.sessions(), settings: store.settings(), health: currentHealth, version: app.getVersion() }; }
+    case 'pickProject': { const choice = await dialog.showOpenDialog(window!, { title: '选择编程项目', properties: ['openDirectory'] }); if (choice.canceled || !choice.filePaths[0]) return null; const p = await store.addProject(choice.filePaths[0]); emit({ type: 'state_changed' }); return p; }
+    case 'createSession': return store.createSession(arg);
+    case 'openSession': await eventQueue; return structuredClone(store.session(arg));
+    case 'renameSession': return store.renameSession(arg.sessionId, arg.title);
+    case 'send': {
+      if (quitting || runs.has(arg.sessionId) || starting.has(arg.sessionId)) throw new Error('此会话已有任务运行中，请先停止或等待完成。');
+      const startup = { cancelled: false };
+      starting.set(arg.sessionId, startup);
+      let active: ActiveRun | undefined;
+      let begun: { id: string; runId?: string } | undefined;
+      try {
+      await recovering.get(arg.sessionId);
+      await eventQueue;
+      const provider = selectProviderModel(store.provider(arg.providerId), arg.modelId);
+      if (provider.kind === 'ollama') { const h = await health(); if (!h.online || !h.modelAvailable) throw new Error(h.message || '本地模型不可用'); }
+      const cipher = store.encryptedKey(provider.id);
+      const secret: ProviderSecret = { ...provider, apiKey: provider.kind === 'ollama' ? 'ollama' : cipher ? safeStorage.decryptString(Buffer.from(cipher, 'base64')) : '' };
+      if (provider.kind !== 'ollama' && !secret.apiKey) throw new Error('请先在设置中保存此 API 的密钥。');
+      if (quitting || startup.cancelled) throw new Error('启动已取消。');
+      const session = await store.beginRun(arg.sessionId, arg.prompt, arg.providerId, provider.model);
+      begun = session;
+      const child = createWorker(session.id, provider.kind !== 'ollama' ? secret.apiKey : undefined);
+      const requestGroup = new URL(provider.baseUrl).origin + ':' + createHash('sha256').update(secret.apiKey).digest('hex');
+      active = { runId: session.runId!, sessionId: session.id, apiKey: provider.kind !== 'ollama' ? secret.apiKey : undefined, child, requestGroup };
+      runs.set(session.id, active);
+      if (quitting || startup.cancelled) throw new Error('启动已取消，任务未执行。');
+      post(active, { type: 'run', runId: session.runId!, sessionId: session.id, projectPath: store.project(session.projectId).path, dataDir, piFile: session.piFile, provider: secret, prompt: arg.prompt });
+      emit({ type: 'state_changed' }); return { runId: session.runId };
+      } catch (error) {
+        if (active) await processEvent({ type: 'settled', runId: active.runId, sessionId: active.sessionId, status: quitting || startup.cancelled ? 'interrupted' : 'failed', error: (error as Error).message });
+        else if (begun?.runId) {
+          const event: AgentEvent = { type: 'settled', runId: begun.runId, sessionId: begun.id, status: 'failed', error: (error as Error).message };
+          await store.event(event); emit(event);
+        }
+        throw error;
+      } finally { starting.delete(arg.sessionId); }
+    }
+    case 'stop': await stopRun(arg); return;
+    case 'approve': { const active = [...runs.values()].find(run => run.runId === arg.runId); if (!active) throw new Error('审批已失效，命令未执行。'); const approval = store.session(active.sessionId).approval; if (!approval || approval.id !== arg.approvalId || approval.runId !== arg.runId) throw new Error('审批不匹配或已失效。'); post(active, { type: 'approve', ...arg }); return; }
+    case 'listFiles': return listWorkspaceFiles(store.project(arg.projectId).path, arg.directory || '');
+    case 'readFile': return readWorkspaceFile(store.project(arg.projectId).path, arg.path);
+    case 'changes': store.session(arg); return getChanges(dataDir, arg);
+    case 'undo': if (runs.size || starting.size) throw new Error('请先停止运行中的任务，再撤销文件修改。'); store.session(arg.sessionId); await undoChange(dataDir, arg.sessionId, arg.path); emit({ type: 'state_changed' }); return;
+    case 'saveProvider': { if (runs.size || starting.size) throw new Error('任务运行时不能修改模型配置。'); const { apiKey, ...publicData } = arg; let cipher: string | undefined; if (apiKey) { if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 密钥加密暂不可用，未保存密钥。'); cipher = safeStorage.encryptString(apiKey).toString('base64'); } const p = await store.saveProvider({ ...publicData, hasKey: false }, cipher); emit({ type: 'state_changed' }); return p; }
+    case 'deleteProvider': { if (runs.size || starting.size) throw new Error('任务运行时不能删除供应商。'); await store.deleteProvider(arg); emit({ type: 'state_changed' }); return; }
+    case 'testProvider': {
+      if (runs.size || starting.size) throw new Error('请等待当前任务结束后测试连接。');
+      const provider = selectProviderModel(store.provider(arg.providerId), arg.modelId);
+      if (provider.kind === 'ollama') throw new Error('请使用 Ollama 状态刷新。');
+      const cipher = store.encryptedKey(provider.id);
+      if (!cipher) throw new Error('请先保存 API Key。');
+      return testConnection({ ...provider, apiKey: safeStorage.decryptString(Buffer.from(cipher, 'base64')) });
+    }
+    case 'setTheme': await store.setTheme(arg); return;
+    case 'setFontSize': await store.setFontSize(arg); return;
+    case 'health': return health();
+    case 'openDataFolder': await shell.openPath(dataDir); return;
+  }
+}
+async function createWindow() {
+  const rendererRoot = path.join(__dirname, 'renderer');
+  protocol.handle('localcode', async request => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== 'app' || request.method !== 'GET') return new Response('Forbidden', { status: 403 });
+      const petAsset = /^\/pets\/(paimon|ronova)\.png$/.exec(url.pathname);
+      if (petAsset) { const bytes = await pets.asset(petAsset[1] as 'paimon' | 'ronova'); return bytes ? new Response(new Uint8Array(bytes), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' } }) : new Response('Pet asset unavailable', { status: 404 }); }
+      const filename = path.resolve(rendererRoot, '.' + decodeURIComponent(url.pathname || '/index.html'));
+      if (!filename.startsWith(rendererRoot + path.sep)) return new Response('Forbidden', { status: 403 });
+      const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
+      return new Response(await fs.readFile(filename), { headers: { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'" } });
+    } catch { return new Response('Not found', { status: 404 }); }
+  });
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = Math.min(1200, Math.floor(workArea.width * .9));
+  const height = Math.min(800, Math.floor(workArea.height * .9));
+  window = new BrowserWindow({ width, height, x: workArea.x + Math.floor((workArea.width - width) / 2), y: workArea.y + Math.floor((workArea.height - height) / 2), minWidth: Math.min(1050, width), minHeight: Math.min(700, height), fullscreen: false, title: 'LocalCode', backgroundColor: '#f9edf1', autoHideMenuBar: true, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false } });
+  window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
+  window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  window.once('ready-to-show', () => window?.show());
+  window.on('close', event => { if (!quitReady) { event.preventDefault(); void shutdown(); } });
+  window.webContents.on('render-process-gone', (_event, details) => { log.write(`Renderer gone: ${details.reason}\n`); for (const pending of starting.values()) pending.cancelled = true; for (const sessionId of runs.keys()) void stopRun(sessionId); });
+  await window.loadURL('localcode://app/index.html');
+}
+async function shutdown() {
+  if (quitting) return;
+  quitting = true;
+  const petShutdown = pets.dispose().catch(error => { log.write(`Pet shutdown: ${error.message}\n`); });
+  for (const pending of starting.values()) pending.cancelled = true;
+  while (starting.size) await new Promise(resolve => setTimeout(resolve, 50));
+  try { await Promise.all([...runs.keys()].map(stopRun)); for (const child of workers.values()) child.kill(); await eventQueue; await Promise.all(recovering.values()); await cleanupCommands(); await store.flush(); } catch (error: any) { log.write(`Shutdown: ${error.message}\n`); }
+  await petShutdown;
+  for (const child of workers.values()) child.kill(); workers.clear(); quitReady = true; app.quit();
+}
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on('second-instance', () => { window?.restore(); window?.show(); window?.focus(); });
+  app.on('before-quit', event => { if (!quitReady) { event.preventDefault(); void shutdown(); } });
+  app.whenReady().then(async () => {
+    await store.init(); await cleanupCommands();
+    ipcMain.handle('localcode:pet', (event, method, argument) => pets.invoke(event, method, argument));
+    ipcMain.handle('localcode:invoke', async (event, method: string, argument: unknown) => {
+      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !event.senderFrame?.url.startsWith('localcode://app/')) throw new Error('无效调用来源');
+      if (typeof method !== 'string' || !Object.hasOwn(schemas, method)) throw new Error('无效操作');
+      const parsed = schemas[method].safeParse(argument);
+      if (!parsed.success) throw new Error(`参数无效：${parsed.error.issues.map(i => i.message).join('；')}`);
+      return invoke(method, parsed.data);
+    });
+    await createWindow();
+    if (quitting) return;
+    try { await pets.init(); }
+    catch (error: any) { if (!quitting) log.write(`Pet unavailable (main window remains usable): ${error.message}\n`); }
+    if (!quitting) void startOllamaIfNeeded();
+  }).catch(error => {
+    if (quitting) { log.write(`Startup cancelled during shutdown: ${error.message}\n`); return; }
+    log.write(`Startup failure: ${error.stack}\n`); dialog.showErrorBox('LocalCode 启动失败', error.message); quitReady = true; app.quit();
+  });
+}

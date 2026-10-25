@@ -1,0 +1,17 @@
+$deployRoot = $PSScriptRoot
+$env:OLLAMA_MODELS = Join-Path $deployRoot 'models'
+$env:OLLAMA_HOST = '127.0.0.1:11434'
+$env:OLLAMA_CONTEXT_LENGTH = '4096'
+$env:OLLAMA_NUM_PARALLEL = '1'
+$env:OLLAMA_MAX_LOADED_MODELS = '1'
+$env:OLLAMA_FLASH_ATTENTION = '1'
+$env:OLLAMA_KV_CACHE_TYPE = 'q8_0'
+$env:OLLAMA_KEEP_ALIVE = '5m'
+$env:OLLAMA_NO_CLOUD = '1'
+$env:USERPROFILE = Join-Path $deployRoot 'profile'
+$env:LOCALAPPDATA = Join-Path $deployRoot 'profile\AppData\Local'
+$env:APPDATA = Join-Path $deployRoot 'profile\AppData\Roaming'
+$env:TEMP = Join-Path $deployRoot 'temp'
+$env:TMP = $env:TEMP
+$env:CUDA_CACHE_PATH = Join-Path $deployRoot 'temp\cuda-cache'
+$env:NO_PROXY = 'localhost,127.0.0.1,::1'
