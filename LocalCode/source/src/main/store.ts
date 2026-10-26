@@ -134,12 +134,27 @@ export class Store {
   async setSidebar(patch: Partial<SidebarPreferences>) {
     for (const [key, value] of Object.entries(patch)) {
       if (key === 'collapsedProjects') { if (!Array.isArray(value)) throw new Error('折叠项目设置无效'); value.forEach(id => this.project(id)); }
-      else if (!['pinnedCollapsed', 'projectsCollapsed', 'recentCollapsed'].includes(key) || typeof value !== 'boolean') throw new Error('侧栏设置无效');
+      else if (!['pinnedCollapsed', 'projectsCollapsed', 'recentCollapsed', 'archivedCollapsed'].includes(key) || typeof value !== 'boolean') throw new Error('侧栏设置无效');
     }
     this.state.settings.sidebar = { ...DEFAULT_SIDEBAR, ...this.state.settings.sidebar, ...patch };
     await this.persist(); return structuredClone(this.state.settings.sidebar);
   }
   async renameSession(id: string, title: string) { const s = this.session(id); s.title = title; await this.persist(); return structuredClone(s); }
+  async archiveSession(id: string, archived: boolean) {
+    const session = this.session(id);
+    if (archived) {
+      if (['running', 'awaiting_approval', 'awaiting_input'].includes(session.status)) throw new Error('请等待任务结束后再归档。');
+      session.archivedAt = new Date().toISOString();
+    } else delete session.archivedAt;
+    await this.persist(); return structuredClone(session);
+  }
+  async deleteSession(id: string) {
+    const session = this.session(id);
+    if (['running', 'awaiting_approval', 'awaiting_input'].includes(session.status)) throw new Error('请等待任务结束后再删除。');
+    this.state.sessions = this.state.sessions.filter(s => s.id !== id);
+    await this.persist();
+    return structuredClone(session);
+  }
   async beginRun(sessionId: string, prompt: string, providerId: string, modelId?: string, options: { attachments?: AttachmentInfo[]; approvalMode?: ApprovalMode; workMode?: WorkMode; automatic?: boolean } = {}) {
     const s = this.session(sessionId); this.provider(providerId);
     const workspace = this.sessionWorkspace(sessionId);

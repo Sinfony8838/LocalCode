@@ -44,6 +44,19 @@ describe('attachments ownership and durability', () => {
     const [resource] = await store.resolveForSend('draft', [file.id], 'session');
     expect(resource.storagePath).toBe(await fs.realpath(folder));
   });
+  it('removes only the deleted session records, blobs and unsent drafts', async () => {
+    const [sent] = await store.importBytes('session:a', [{ name: 'sent.txt', data: Buffer.from('sent').toString('base64') }]);
+    const [other] = await store.importBytes('session:b', [{ name: 'other.txt', data: Buffer.from('other').toString('base64') }]);
+    const [draft] = await store.importBytes('session:a', [{ name: 'draft.txt', data: Buffer.from('draft').toString('base64') }]);
+    await store.resolveForSend('session:a', [sent.id], 'session:a');
+    await store.resolveForSend('session:b', [other.id], 'session:b');
+    await store.removeSession('session:a');
+    await expect(store.resolveHistory('session:a', [sent.id])).rejects.toThrow();
+    await expect(store.resolveForSend('session:a', [draft.id], 'session:a')).rejects.toThrow();
+    await expect(store.resolveHistory('session:b', [other.id])).resolves.toHaveLength(1);
+    await expect(fs.access(path.join(data, 'attachments', sent.id + '.blob'))).rejects.toThrow();
+    await expect(store.removeSession('../evil')).rejects.toThrow();
+  });
 });
 
 describe('attachments validation boundaries', () => {

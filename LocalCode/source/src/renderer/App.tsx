@@ -97,6 +97,7 @@ export default function App() {
   const [renameId, setRenameId] = useState('');
   const [renameTitle, setRenameTitle] = useState('');
   const [moveSessionId, setMoveSessionId] = useState('');
+  const [deleteId, setDeleteId] = useState('');
   const navigationRevision = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const activeSessionRef = useRef(activeSessionId);
@@ -248,7 +249,7 @@ export default function App() {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === ',') { event.preventDefault(); openSettings(); }
-      if (event.key === 'Escape') { setSettingsOpen(false); setRenameId(''); }
+      if (event.key === 'Escape') { setSettingsOpen(false); setRenameId(''); setDeleteId(''); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -505,6 +506,26 @@ export default function App() {
     try { const updated = await window.localcode.renameSession({ sessionId: renameId, title: renameTitle.trim() }); putSession(updated); setRenameId(''); }
     catch (failure) { setError(errorText(failure)); }
   };
+  const archiveTask = async (session: SessionView, archived: boolean) => {
+    try {
+      const updated = await window.localcode.archiveSession({ sessionId: session.id, archived });
+      putSession(updated);
+      if (archived && activeSessionRef.current === session.id) goHome();
+    } catch (failure) { setError(errorText(failure)); }
+  };
+  const deleteTask = async () => {
+    const sessionId = deleteId;
+    if (!sessionId) return;
+    try {
+      await window.localcode.deleteSession(sessionId);
+      setBoot(previous => previous ? { ...previous, sessions: previous.sessions.filter(item => item.id !== sessionId) } : previous);
+      setDrafts(previous => { const next = { ...previous }; delete next[sessionId]; return next; });
+      setDraftModels(previous => { const next = { ...previous }; delete next[sessionId]; return next; });
+      setPendingImports(previous => { const next = { ...previous }; delete next[sessionId]; return next; });
+      setDeleteId('');
+      if (activeSessionRef.current === sessionId) goHome();
+    } catch (failure) { setError(errorText(failure)); }
+  };
 
   if (!connected) return <div className="bridge-empty"><div className="brand-mark"><BrandLogo /></div><h1>LocalCode</h1><p>{t("请通过 LocalCode 桌面程序打开此页面。")}</p><span>{t("本地工具只通过桌面应用的受控接口提供。")}</span></div>;
   if (loading) return <div className="bridge-empty"><div className="brand-mark"><BrandLogo /></div><h1>LocalCode</h1><p><LoaderCircle className="spin" size={16} />{t(" 正在打开你的工作区…")}</p></div>;
@@ -523,7 +544,7 @@ export default function App() {
     <aside className="sidebar">
       <div className="sidebar-brand drag-region"><BrandLogo /><span>LocalCode</span><ChevronDown size={13} /><button className="icon-button" title={t("打开项目文件夹")} aria-label={t("打开项目文件夹")} onClick={() => void openProject()}><FolderPlus size={16} /></button></div>
       <div className="sidebar-actions"><button className="new-task-button" onClick={() => void newSession()}><SquarePen size={15} /><span>{t("新建任务")}</span></button></div>
-      <TaskSidebar projects={boot?.projects || []} sessions={sessions} activeProjectId={activeProjectId} activeSessionId={activeSessionId} preferences={sidebarPreferences} onProject={selectProject} onSession={session => void openSession(session)} onAddProject={() => void openProject()} onRename={session => { setRenameId(session.id); setRenameTitle(session.title); }} onMove={session => setMoveSessionId(session.id)} onPin={project => void togglePinned(project)} onPreferences={patch => void updateSidebar(patch)} />
+      <TaskSidebar projects={boot?.projects || []} sessions={sessions} activeProjectId={activeProjectId} activeSessionId={activeSessionId} preferences={sidebarPreferences} onProject={selectProject} onSession={session => void openSession(session)} onAddProject={() => void openProject()} onRename={session => { setRenameId(session.id); setRenameTitle(session.title); }} onMove={session => setMoveSessionId(session.id)} onPin={project => void togglePinned(project)} onArchive={(session, archived) => void archiveTask(session, archived)} onDelete={session => setDeleteId(session.id)} onPreferences={patch => void updateSidebar(patch)} />
       {busySession && busySession.id !== activeSessionId && <button className="background-task" onClick={() => void openSession(busySession)}><LoaderCircle size={14} className="spin" /><span>{busySession.status === 'awaiting_approval' ? t('有任务等待确认') : t('有任务正在运行')}</span><ArrowUpRight size={13} /></button>}
       <div className="sidebar-footer">
         <div className="local-health" title={cloudSelected ? t("云端模型不依赖本地 Ollama；连通性请在设置中手动测试。") : boot?.health.message ? t(boot.health.message) : undefined}><span className={`status-dot ${cloudSelected ? provider?.hasKey ? 'online' : 'offline' : boot?.health.online && boot?.health.modelAvailable ? 'online' : 'offline'}`} /><span>{cloudSelected ? t("云端模式 · 无需 Ollama") : boot?.health.online ? boot.health.modelAvailable ? boot.health.gpuPercent === 0 ? t("CPU 运行 · 较慢") : t("本地模型已就绪") : t("模型尚未就绪") : t("Ollama 未连接")}</span><button className="icon-button" title={t("刷新连接")} aria-label={t("刷新模型连接")} onClick={() => void checkHealth()} disabled={healthPending}><RefreshCw size={13} className={healthPending ? 'spin' : ''} /></button></div>
@@ -588,6 +609,7 @@ export default function App() {
     {settingsOpen && boot && <SettingsDialog onCreatePet={createPetInProject} hasProject={Boolean(activeProjectId)} initialTab={settingsInitialTab} returnFocusTo={settingsOpener.current} settings={boot.settings} health={boot.health} version={boot.version} onClose={() => setSettingsOpen(false)} onTheme={changeTheme} onLocale={changeLocale} onFontSize={changeFontSize} onHealth={checkHealth} healthPending={healthPending} onSaved={refresh} onOpenData={() => { void window.localcode.openDataFolder().catch(failure => setError(errorText(failure))); }} />}
     {checkpointPreview && <ChangeCheckpointDialog preview={checkpointPreview} returnFocusTo={checkpointOpener.current} pending={checkpointPending} error={checkpointError} onCancel={() => { checkpointRequest.current++; setCheckpointPreview(null); setCheckpointError(''); }} onConfirm={() => void confirmCheckpoint()} />}
     {renameId && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setRenameId(''); }}><form className="small-dialog" onSubmit={event => { event.preventDefault(); void renameSession(); }}><h2>{t("重命名会话")}</h2><label className="field"><span>{t("会话名称")}</span><input autoFocus value={renameTitle} maxLength={100} onChange={event => setRenameTitle(event.target.value)} /></label><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setRenameId('')}>{t("取消")}</button><button className="primary-button" disabled={!renameTitle.trim()}>{t("保存")}</button></div></form></div>}
+    {deleteId && sessions.find(session => session.id === deleteId) && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setDeleteId(''); }} onKeyDown={event => { if (event.key === 'Escape') setDeleteId(''); }}><section className="small-dialog" role="dialog" aria-modal="true" aria-label={t("删除任务")}><h2>{t("删除任务")}</h2><p className="dialog-note">{t("将永久删除「{title}」的对话记录和运行历史，项目文件不受影响。", { title: sessionTitle(sessions.find(session => session.id === deleteId)!) })}</p><div className="dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setDeleteId('')}>{t("取消")}</button><button type="button" className="danger-button" onClick={() => void deleteTask()}>{t("删除")}</button></div></section></div>}
     {moveSessionId && sessions.find(session => session.id === moveSessionId) && <MoveTaskDialog session={sessions.find(session => session.id === moveSessionId)!} projects={boot?.projects || []} onClose={() => setMoveSessionId('')} onMove={projectId => moveTask(moveSessionId, projectId)} onCreate={() => openProject(moveSessionId)} />}
     <ArtifactPanel controller={artifacts} />
     <ArtifactMenu controller={artifacts} />

@@ -193,6 +193,9 @@ svg { flex-shrink: 0; }
 .primary-button, .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 7px; padding: 9px 14px; font-size: 0.75rem; font-weight: 500; border: 1px solid transparent; min-height: 35px; }
 .primary-button { background: var(--accent); color: var(--on-accent); }
 .primary-button:hover:not(:disabled) { background: var(--accent-hover); }
+.danger-button { background: var(--danger); color: var(--surface); }
+.danger-button:hover:not(:disabled) { opacity: .88; }
+.small-dialog .dialog-note { margin: -8px 0 0; color: var(--muted); font-size: 0.75rem; line-height: var(--leading-body); overflow-wrap: anywhere; }
 .secondary-button { background: var(--surface); border-color: var(--border-strong); }
 .secondary-button:hover:not(:disabled) { background: var(--hover); }
 .open-project-hero { margin-top: 27px; padding: 12px 17px; }

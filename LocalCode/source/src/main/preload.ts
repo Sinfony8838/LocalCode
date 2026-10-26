@@ -6,6 +6,7 @@ const api: LocalCodeApi = {
   setLocale: locale => invoke('setLocale', locale),
   bootstrap: () => invoke('bootstrap'), pickProject: () => invoke('pickProject'),
   createSession: id => invoke('createSession', id), openSession: id => invoke('openSession', id), renameSession: input => invoke('renameSession', input),
+  archiveSession: input => invoke('archiveSession', input), deleteSession: id => invoke('deleteSession', id),
   moveSession: input => invoke('moveSession', input), setProjectPinned: input => invoke('setProjectPinned', input), setSidebar: input => invoke('setSidebar', input),
   send: input => invoke('send', input), stop: id => invoke('stop', id), approve: input => invoke('approve', input),
   pickAttachments: input => invoke('pickAttachments', input), importAttachments: input => invoke('importAttachments', input),

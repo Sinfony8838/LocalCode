@@ -8,6 +8,8 @@ import { prepareStartupStorage, STARTUP_STORAGE_ERROR, LOG_STORAGE_ERROR } from 
 import { RequestScheduler } from './request-scheduler';
 import { AttachmentStore } from './attachments';
 import { GoalClock, canContinueGoal, continuationPrompt, DEFAULT_GOAL_BUDGET_MS, WORK_TOOLS } from '../core/goals';
+import { removeSessionChanges } from '../core/run-changes';
+import { removeSessionStorage } from '../core/session-storage';
 import { ArtifactController } from './artifacts';
 import { PREVIEW_SCHEME, resolveArtifactPath, externalBrowserUrl } from '../core/artifacts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -327,6 +329,8 @@ const schemas: Record<string, z.ZodType> = {
   setProjectPinned: z.object({ projectId: id, pinned: z.boolean() }).strict(),
   setSidebar: z.object({ pinnedCollapsed: z.boolean(), projectsCollapsed: z.boolean(), recentCollapsed: z.boolean(), collapsedProjects: z.array(id).max(1000) }).partial().strict(),
   renameSession: z.object({ sessionId: id, title: z.string().trim().min(1).max(100) }).strict(),
+  archiveSession: z.object({ sessionId: id, archived: z.boolean() }).strict(),
+  deleteSession: id,
   send: z.object({ sessionId: id, prompt: z.string().trim().max(30000), providerId, modelId: z.string().min(1).max(200).optional(), draftKey: z.string().regex(/^[A-Za-z0-9:_-]{1,160}$/).optional(),
     attachmentIds: z.array(id).max(10).optional(), approvalMode: z.enum(['ask','auto','full']).optional(), workMode: z.enum(['execute','plan']).optional(),
     goal: z.object({objective:z.string().trim().min(1).max(10000),budgetMs:z.number().int().min(900000).max(86400000)}).strict().optional() }).strict(), stop: id,
@@ -385,6 +389,28 @@ async function invoke(method: string, arg: any) {
     case 'setSidebar': { const sidebar = await store.setSidebar(arg); emit({ type: 'state_changed' }); return sidebar; }
     case 'openSession': await eventQueue; return structuredClone(store.session(arg));
     case 'renameSession': return store.renameSession(arg.sessionId, arg.title);
+    case 'archiveSession': {
+      if (arg.archived) {
+        // A pending goal continuation could restart the run after archiving.
+        if (runs.has(arg.sessionId) || starting.has(arg.sessionId) || recovering.has(arg.sessionId)) throw new Error('请等待任务结束后再归档。');
+        cancelContinuation(arg.sessionId);
+        const goal = store.session(arg.sessionId).goal;
+        if (goal?.status === 'active') await store.updateGoal(arg.sessionId, goal.id, { status: 'paused', reason: '任务已归档，目标已暂停。' });
+      }
+      const updated = await store.archiveSession(arg.sessionId, arg.archived);
+      emit({ type: 'state_changed' });
+      return updated;
+    }
+    case 'deleteSession': {
+      if (runs.has(arg) || starting.has(arg) || recovering.has(arg)) throw new Error('请等待任务结束后再删除。');
+      cancelContinuation(arg);
+      await store.deleteSession(arg);
+      // Leftover journals, transcripts and blobs are harmless orphans; cleanup
+      // failures must not resurrect an already-deleted conversation.
+      await Promise.allSettled([attachments.removeSession(arg), removeSessionChanges(dataDir, arg), removeSessionStorage(dataDir, arg)]);
+      emit({ type: 'state_changed' });
+      return;
+    }
     case 'copyText': await clipboard.writeText(arg); return;
     case 'send': return startRun(arg);
     case 'stop': {

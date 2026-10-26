@@ -1,18 +1,20 @@
 import { t, useLocale } from './i18n';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, LoaderCircle, MoreHorizontal, Pin, PinOff, Search, SquarePen, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, LoaderCircle, MoreHorizontal, Pin, PinOff, Search, SquarePen, Trash2, X } from 'lucide-react';
 import type { Project, SessionView, SidebarPreferences } from '../shared/contracts';
 import './task-navigation.css';
 
 const busy = (session: SessionView) => ['running', 'awaiting_approval', 'awaiting_input'].includes(session.status);
 const recent = (sessions: SessionView[]) => [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+const byArchived = (sessions: SessionView[]) => [...sessions].sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''));
 type MenuTarget = { project: Project; session?: never } | { session: SessionView; project?: never };
 
-export default function TaskSidebar({ projects, sessions, activeProjectId, activeSessionId, preferences, onProject, onSession, onAddProject, onRename, onMove, onPin, onPreferences }: {
+export default function TaskSidebar({ projects, sessions, activeProjectId, activeSessionId, preferences, onProject, onSession, onAddProject, onRename, onMove, onPin, onArchive, onDelete, onPreferences }: {
   projects: Project[]; sessions: SessionView[]; activeProjectId: string; activeSessionId: string; preferences: SidebarPreferences;
   onProject(id: string): void; onSession(session: SessionView): void; onAddProject(): void;
   onRename(session: SessionView): void; onMove(session: SessionView): void; onPin(project: Project): void;
+  onArchive(session: SessionView, archived: boolean): void; onDelete(session: SessionView): void;
   onPreferences(patch: Partial<SidebarPreferences>): void;
 }) {
   useLocale();
@@ -36,7 +38,7 @@ export default function TaskSidebar({ projects, sessions, activeProjectId, activ
     <button className="session-more icon-button" aria-label={t('任务选项 {title}', { title: session.title })} title={t("任务选项")} onClick={event => showMenu(event, { session })}><MoreHorizontal size={14} /></button>
   </div>;
   const projectGroup = (project: Project) => {
-    const collapsed = preferences.collapsedProjects.includes(project.id), tasks = recent(sessions.filter(s => s.projectId === project.id));
+    const collapsed = preferences.collapsedProjects.includes(project.id), tasks = recent(sessions.filter(s => s.projectId === project.id && !s.archivedAt));
     return <div className="project-group" data-project-id={project.id} key={project.id}>
       <div className="project-row" onContextMenu={event => showMenu(event, { project })}>
         <button className="project-chevron icon-button" aria-label={t(collapsed ? '展开项目 {name}' : '收起项目 {name}', { name: project.name })} aria-expanded={!collapsed} onClick={() => onPreferences({ collapsedProjects: collapsed ? preferences.collapsedProjects.filter(id => id !== project.id) : [...preferences.collapsedProjects, project.id] })}><ChevronRight size={13} className={collapsed ? '' : 'rotate-90'} /></button>
@@ -46,13 +48,14 @@ export default function TaskSidebar({ projects, sessions, activeProjectId, activ
       {!collapsed && <div className="project-tasks">{(allProjects[project.id] ? tasks : tasks.slice(0, 5)).map(s => task(s, true))}{tasks.length > 5 && <button className="show-project-tasks" onClick={() => setAllProjects(previous => ({ ...previous, [project.id]: !previous[project.id] }))}>{allProjects[project.id] ? t('收起显示') : t('展开显示')}</button>}</div>}
     </div>;
   };
-  const heading = (title: string, key: 'pinnedCollapsed' | 'projectsCollapsed' | 'recentCollapsed', extra?: React.ReactNode) => <div className="section-label task-section-label"><button className="section-toggle" aria-label={t(preferences[key] ? '展开{section}' : '收起{section}', { section: t(title) })} aria-expanded={!preferences[key]} onClick={() => onPreferences({ [key]: !preferences[key] })}><span>{t(title)}</span><ChevronRight size={13} className={preferences[key] ? '' : 'rotate-90'} /></button>{extra}</div>;
+  const heading = (title: string, key: 'pinnedCollapsed' | 'projectsCollapsed' | 'recentCollapsed' | 'archivedCollapsed', extra?: React.ReactNode) => <div className="section-label task-section-label"><button className="section-toggle" aria-label={t(preferences[key] ? '展开{section}' : '收起{section}', { section: t(title) })} aria-expanded={!preferences[key]} onClick={() => onPreferences({ [key]: !preferences[key] })}><span>{t(title)}</span><ChevronRight size={13} className={preferences[key] ? '' : 'rotate-90'} /></button>{extra}</div>;
   return <div className="task-sidebar-content">
     {projects.some(p => p.pinned) && <section aria-label={t("置顶项目")}>{heading(t('置顶'), 'pinnedCollapsed')}{!preferences.pinnedCollapsed && projects.filter(p => p.pinned).map(projectGroup)}</section>}
     <section aria-label={t("项目分组")}>{heading(t('项目'), 'projectsCollapsed', <button className="icon-button" aria-label={t("打开项目文件夹")} title={t("添加项目")} onClick={onAddProject}><FolderPlus size={15} /></button>)}
       {!preferences.projectsCollapsed && <nav className="grouped-projects" aria-label={t("项目列表")}>{projects.filter(p => !p.pinned).map(projectGroup)}{!projects.length && <button className="add-first-project" onClick={onAddProject}><FolderPlus size={16} />{t("添加项目")}</button>}</nav>}
     </section>
-    <section aria-label={t("最近任务")}>{heading(t('最近'), 'recentCollapsed')}{!preferences.recentCollapsed && <nav className="session-list" aria-label={t("会话记录")}>{recent(sessions).map(s => task(s))}{!sessions.length && <p className="sidebar-empty">{t("开始对话，任务会保存在这里。")}</p>}</nav>}</section>
+    <section aria-label={t("最近任务")}>{heading(t('最近'), 'recentCollapsed')}{!preferences.recentCollapsed && <nav className="session-list" aria-label={t("会话记录")}>{recent(sessions.filter(s => !s.archivedAt)).map(s => task(s))}{!sessions.length && <p className="sidebar-empty">{t("开始对话，任务会保存在这里。")}</p>}</nav>}</section>
+    {sessions.some(s => s.archivedAt) && <section aria-label={t("已归档任务")}>{heading(t('已归档'), 'archivedCollapsed')}{!preferences.archivedCollapsed && <nav className="session-list archived-session-list" aria-label={t("已归档任务")}>{byArchived(sessions.filter(s => s.archivedAt)).map(s => task(s))}</nav>}</section>}
     {menu && createPortal(<div ref={menuRef} className="sidebar-item-menu" role="menu" aria-label={t("侧栏选项")} style={{ left: Math.max(8, menu.x), top: Math.max(8, menu.y) }} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); closeMenu(); }
       if (event.key === 'Tab') setMenu(null);
@@ -62,7 +65,11 @@ export default function TaskSidebar({ projects, sessions, activeProjectId, activ
       <button role="menuitem" onClick={() => { onProject(menu.target.project!.id); closeMenu(); }}><SquarePen size={15} />{t("在此项目中新建任务")}</button>
     </> : <>
       <button role="menuitem" onClick={() => { onRename(menu.target.session!); closeMenu(); }}><SquarePen size={15} />{t("重命名任务")}</button>
-      {!menu.target.session!.projectId && <button role="menuitem" disabled={busy(menu.target.session!)} onClick={() => { onMove(menu.target.session!); closeMenu(); }}><Folder size={15} />{t("移入项目")}</button>}
+      {!menu.target.session!.projectId && !menu.target.session!.archivedAt && <button role="menuitem" disabled={busy(menu.target.session!)} onClick={() => { onMove(menu.target.session!); closeMenu(); }}><Folder size={15} />{t("移入项目")}</button>}
+      {menu.target.session!.archivedAt
+        ? <button role="menuitem" onClick={() => { onArchive(menu.target.session!, false); closeMenu(); }}><ArchiveRestore size={15} />{t("恢复任务")}</button>
+        : <button role="menuitem" disabled={busy(menu.target.session!)} onClick={() => { onArchive(menu.target.session!, true); closeMenu(); }}><Archive size={15} />{t("归档任务")}</button>}
+      <button role="menuitem" className="danger-menuitem" disabled={busy(menu.target.session!)} onClick={() => { onDelete(menu.target.session!); closeMenu(); }}><Trash2 size={15} />{t("删除任务")}</button>
     </>}</div>, document.body)}
   </div>;
 }
