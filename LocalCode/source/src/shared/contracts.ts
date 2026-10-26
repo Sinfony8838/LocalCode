@@ -1,3 +1,4 @@
+import type { WorkspaceContext } from '../core/workspace-context';
 import type { ArtifactInfo, ArtifactAction, ArtifactInputKind } from './artifacts';
 export type RunStatus = 'idle' | 'running' | 'awaiting_approval' | 'awaiting_input' | 'completed' | 'failed' | 'interrupted';
 export type ApprovalMode = 'ask' | 'auto' | 'full';
@@ -61,7 +62,7 @@ export type AgentEvent = { runId: string; sessionId: string; recordedAt?: string
  | { type: 'settled'; status: 'completed' | 'failed' | 'interrupted'; error?: string; summary?: RunSummary }
  | { type: 'notice'; message: string }
 );
-export interface RunRequest { type: 'run'; runId: string; sessionId: string; projectPath: string; dataDir: string; piFile?: string; provider: ProviderSecret; prompt: string; approvalMode?: ApprovalMode; workMode?: WorkMode; grants?: string[]; attachments?: AttachmentResource[]; newAttachmentIds?: string[]; goal?: { id: string; objective: string }; automatic?: boolean; locale?: AppLocale }
+export interface RunRequest extends WorkspaceContext { type: 'run'; runId: string; sessionId: string; projectPath: string; dataDir: string; piFile?: string; provider: ProviderSecret; prompt: string; approvalMode?: ApprovalMode; workMode?: WorkMode; grants?: string[]; attachments?: AttachmentResource[]; newAttachmentIds?: string[]; goal?: { id: string; objective: string }; automatic?: boolean; locale?: AppLocale }
 export type WorkerCommand = RunRequest | { type: 'approve'; runId: string; approvalId: string; allow: boolean; scope?: 'once' | 'session' } | { type: 'answer'; runId: string; questionId: string; answers: string[][] | null } | { type: 'abort'; runId: string } | { type: 'shutdown' };
 export type TransportMessage = { runId: string; sessionId: string; requestId: string } & ({ type: 'request_acquire' } | { type: 'request_release'; cooldownUntil?: number } | { type: 'request_cancel' });
 export type TransportGrant = { type: 'request_grant'; runId: string; requestId: string };

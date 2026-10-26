@@ -1,3 +1,4 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -20,7 +21,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await fs.mkdtemp(path.join(testBase, '.command-')); roots.push(root);
   const projectPath = path.join(root, 'project with spaces'); const dataDir = path.join(root, 'data'); await fs.mkdir(projectPath);
-  return { root, projectPath, cwd: projectPath, dataDir, sessionId: 'commands', runId: 'run-one', maxResultChars: 400, emit: () => {} };
+  return { root, ...workspaceContext(projectPath, dataDir), cwd: projectPath, sessionId: 'commands', runId: 'run-one', maxResultChars: 400, emit: () => {} };
 }
 const win = describe.skipIf(process.platform !== 'win32');
 

@@ -1,8 +1,9 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createWorkspaceTools } from '../src/agent/tools.js';
-import { getChanges, listWorkspaceFiles, MAX_FILE_BYTES, readWorkspaceFile, readWorkspaceText, resolveWorkspacePath, undoChange, writeWorkspaceText } from '../src/core/workspace.js';
+import { getChanges, listWorkspaceFiles, MAX_FILE_BYTES, readWorkspaceFile, readWorkspaceText, resolveWorkspacePath, undoChange, previewChangeCheckpoint, checkpointChange, writeWorkspaceText } from '../src/core/workspace.js';
 import { beginRunChanges, finishRunChanges } from '../src/core/run-changes.js';
 
 const testBase = path.resolve('tests');
@@ -17,7 +18,7 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(testBase, '.workspace-')); roots.push(root);
   const projectPath = path.join(root, 'project'); const dataDir = path.join(root, 'data'); const outside = path.join(root, 'outside');
   await Promise.all([fs.mkdir(projectPath), fs.mkdir(outside)]);
-  const context = { projectPath, dataDir, sessionId: 'test-session', runId: 'run-one' };
+  const context = { ...workspaceContext(projectPath, dataDir), sessionId: 'test-session', runId: 'run-one' };
   const write = (relativePath: string, content: string, expectedText?: string) => writeWorkspaceText({ ...context, relativePath, content, expectedText });
   return { ...context, root, outside, write };
 }
@@ -29,20 +30,20 @@ describe('workspace containment', () => {
       await expect(f.write(invalid, 'BAD')).rejects.toThrow();
     }
     expect(await fs.readFile(path.join(f.outside, 'keep.txt'), 'utf8')).toBe('outside');
-    expect(await getChanges(f.dataDir, f.sessionId)).toEqual([]);
+    expect(await getChanges(f, f.sessionId)).toEqual([]);
   });
 
   it('rejects outside junctions, including a dangling junction used as a new-file parent', async () => {
     const f = await fixture(); await fs.writeFile(path.join(f.outside, 'keep.txt'), 'outside');
     await fs.symlink(f.outside, path.join(f.projectPath, 'escape'), 'junction');
-    await expect(readWorkspaceText(f.projectPath, 'escape/keep.txt')).rejects.toThrow(/链接/);
+    await expect(readWorkspaceText(f, 'escape/keep.txt')).rejects.toThrow(/链接/);
     await expect(f.write('escape/keep.txt', 'BAD')).rejects.toThrow(/链接/);
     await expect(f.write('escape/new/deep.txt', 'BAD')).rejects.toThrow(/链接/);
     const absentOutside = path.join(f.root, 'not-created-outside');
     await fs.symlink(absentOutside, path.join(f.projectPath, 'dangling'), 'junction');
     await expect(f.write('dangling/new.txt', 'BAD')).rejects.toThrow(/链接/);
     await expect(fs.stat(absentOutside)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await listWorkspaceFiles(f.projectPath)).toEqual([]);
+    expect(await listWorkspaceFiles(f)).toEqual([]);
     expect(await fs.readFile(path.join(f.outside, 'keep.txt'), 'utf8')).toBe('outside');
   });
 
@@ -52,7 +53,7 @@ describe('workspace containment', () => {
     await expect(f.write('linked.txt', 'BAD')).rejects.toThrow(/硬链接/);
     await fs.mkdir(path.join(f.projectPath, '.git')); await fs.writeFile(path.join(f.projectPath, '.git/config'), 'git');
     await fs.symlink(path.join(f.projectPath, '.git'), path.join(f.projectPath, 'alias'), 'junction');
-    await expect(readWorkspaceText(f.projectPath, 'alias/config')).rejects.toThrow(/\.git/);
+    await expect(readWorkspaceText(f, 'alias/config')).rejects.toThrow(/\.git/);
     expect(await fs.readFile(outsideFile, 'utf8')).toBe('outside');
   });
 
@@ -61,15 +62,15 @@ describe('workspace containment', () => {
     for (const name of ['node_modules', '.git', 'models', 'runtime']) await fs.mkdir(path.join(f.projectPath, name));
     await fs.writeFile(path.join(f.projectPath, '.env'), 'secret');
     await fs.writeFile(path.join(f.projectPath, 'hello.ts'), 'export const hello = 1;');
-    expect((await listWorkspaceFiles(f.projectPath)).map(e => e.path)).toEqual(['hello.ts']);
-    expect((await resolveWorkspacePath(f.projectPath, '', { directory: true })).absolute).toBe(await fs.realpath(f.projectPath));
+    expect((await listWorkspaceFiles(f)).map(e => e.path)).toEqual(['hello.ts']);
+    expect((await resolveWorkspacePath(f, '', { directory: true })).absolute).toBe(await fs.realpath(f.projectPath));
   });
 
   it('rejects binary, invalid UTF-8 and oversized source files without mutation', async () => {
     const f = await fixture();
     for (const [name, bytes] of [['binary', Buffer.from([1, 0, 3])], ['invalid', Buffer.from([0xff, 0xfe])], ['large', Buffer.alloc(MAX_FILE_BYTES + 1, 65)]] as const) {
       await fs.writeFile(path.join(f.projectPath, name), bytes);
-      await expect(readWorkspaceFile(f.projectPath, name)).rejects.toThrow();
+      await expect(readWorkspaceFile(f, name)).rejects.toThrow();
       await expect(f.write(name, 'BAD')).rejects.toThrow();
       expect((await fs.readFile(path.join(f.projectPath, name))).equals(bytes)).toBe(true);
     }
@@ -81,19 +82,19 @@ describe('journal and safe undo', () => {
     const f = await fixture(); const file = path.join(f.projectPath, 'dirty.ts');
     const original = Buffer.from('\ufeff// 用户尚未提交的修改\r\nexport const value = 1;\r\n');
     await fs.writeFile(file, original); await f.write('dirty.ts', '// first\n'); await f.write('dirty.ts', '// second\n');
-    const changes = await getChanges(f.dataDir, f.sessionId);
+    const changes = await getChanges(f, f.sessionId);
     expect(changes).toHaveLength(1); expect(changes[0]).toMatchObject({ before: original.toString(), after: '// second\n', conflict: false, created: false });
-    await undoChange(f.dataDir, f.sessionId, 'dirty.ts');
-    expect(await fs.readFile(file)).toEqual(original); expect(await getChanges(f.dataDir, f.sessionId)).toEqual([]);
+    await undoChange(f, f.sessionId, 'dirty.ts');
+    expect(await fs.readFile(file)).toEqual(original); expect(await getChanges(f, f.sessionId)).toEqual([]);
   });
 
   it('preserves both the agent result and newer user edits when undo conflicts', async () => {
     const f = await fixture(); const file = path.join(f.projectPath, 'code.ts'); await fs.writeFile(file, 'original');
     await f.write('code.ts', 'agent'); await fs.writeFile(file, 'user after agent');
-    await expect(undoChange(f.dataDir, f.sessionId, 'code.ts')).rejects.toThrow(/撤销冲突/);
+    await expect(undoChange(f, f.sessionId, 'code.ts')).rejects.toThrow(/撤销冲突/);
     await expect(f.write('code.ts', 'second agent')).rejects.toThrow(/新修改/);
     expect(await fs.readFile(file, 'utf8')).toBe('user after agent');
-    expect((await getChanges(f.dataDir, f.sessionId))[0]).toMatchObject({ before: 'original', after: 'agent', conflict: true });
+    expect((await getChanges(f, f.sessionId))[0]).toMatchObject({ before: 'original', after: 'agent', conflict: true });
   });
 
   it('checks an expected read value before mutation and safely undoes created nested files', async () => {
@@ -101,8 +102,8 @@ describe('journal and safe undo', () => {
     await expect(f.write('file.txt', 'BAD', 'stale read')).rejects.toThrow(/读取后已变化/);
     expect(await fs.readFile(file, 'utf8')).toBe('newer user value');
     await f.write('new/nested/code.ts', 'export const x = 1;');
-    expect((await getChanges(f.dataDir, f.sessionId))[0].created).toBe(true);
-    await undoChange(f.dataDir, f.sessionId, 'new/nested/code.ts');
+    expect((await getChanges(f, f.sessionId))[0].created).toBe(true);
+    await undoChange(f, f.sessionId, 'new/nested/code.ts');
     await expect(fs.stat(path.join(f.projectPath, 'new/nested/code.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -111,8 +112,8 @@ describe('journal and safe undo', () => {
     const journalFile = path.join(f.dataDir, 'changes', f.sessionId, 'index.json');
     const journal = JSON.parse(await fs.readFile(journalFile, 'utf8')); journal.records[0].pending = true;
     await fs.writeFile(journalFile, JSON.stringify(journal));
-    expect((await getChanges(f.dataDir, f.sessionId))[0]).toMatchObject({ conflict: true, before: 'original' });
-    await undoChange(f.dataDir, f.sessionId, 'code.ts');
+    expect((await getChanges(f, f.sessionId))[0]).toMatchObject({ conflict: true, before: 'original' });
+    await undoChange(f, f.sessionId, 'code.ts');
     expect(await fs.readFile(path.join(f.projectPath, 'code.ts'), 'utf8')).toBe('original');
   });
 });
@@ -147,23 +148,44 @@ describe('tool validation and context budget', () => {
 });
 
 describe('authorized external resources and read-only attachments', () => {
+  it('binds external journal resources to the registered project and session before exposing content', async () => {
+    const f = await fixture(); const target = path.join(f.outside, 'external.txt');
+    const tools = createWorkspaceTools({ ...f, approvalMode: 'full', maxResultChars: 1000, emit: () => {}, requestApproval: async () => true });
+    await tools.find(t => t.name === 'write_file')!.execute('write', { path: target, content: 'external' }, undefined, undefined, {} as never);
+    const journalFile = path.join(f.dataDir, 'changes', f.sessionId, 'index.json');
+    const original = await fs.readFile(journalFile, 'utf8');
+    const forged = JSON.parse(original); forged.records[0].path = 'other.txt';
+    await fs.writeFile(journalFile, JSON.stringify(forged));
+    await expect(getChanges(f, f.sessionId)).rejects.toThrow('不一致');
+    await fs.writeFile(journalFile, original);
+    const other = path.join(f.dataDir, 'changes/other-session'); await fs.mkdir(other, { recursive: true });
+    await fs.copyFile(journalFile, path.join(other, 'index.json'));
+    await fs.copyFile(path.join(f.dataDir, 'changes', f.sessionId, 'resource.key'), path.join(other, 'resource.key'));
+    await expect(getChanges(f, 'other-session')).rejects.toThrow('不一致');
+    await fs.writeFile(target, 'manual');
+    const review = await previewChangeCheckpoint(f, f.sessionId, target);
+    await checkpointChange(f, f.sessionId, target, review.currentHash, review.recordHash);
+    expect(await fs.readFile(target, 'utf8')).toBe('manual');
+    expect((await getChanges(f, f.sessionId))[0].conflict).toBe(false);
+  });
+
   it('asks for external writes and independently journals same-named external and project files', async () => {
     const f = await fixture(); await fs.writeFile(path.join(f.outside, 'same.txt'), 'outside original'); await fs.writeFile(path.join(f.projectPath, 'same.txt'), 'project original');
     await fs.mkdir(f.dataDir, { recursive: true });
-    await beginRunChanges(f.dataDir, f.sessionId, f.runId, f.projectPath);
+    await beginRunChanges(f, f.sessionId, f.runId);
     const approvals: any[] = []; const tools = createWorkspaceTools({ ...f, approvalMode: 'auto', maxResultChars: 1000, emit: () => {}, requestApproval: async a => { approvals.push(a); return true; } });
     const write = tools.find(t => t.name === 'write_file')!;
     await write.execute('external', { path: path.join(f.outside, 'same.txt'), content: 'outside agent' }, undefined, undefined, {} as never);
     await write.execute('project', { path: 'same.txt', content: 'project agent' }, undefined, undefined, {} as never);
     expect(approvals).toHaveLength(1); expect(approvals[0]).toMatchObject({ kind: 'write', resource: path.join(f.outside, 'same.txt'), toolCallId: 'external' });
-    const changes = await getChanges(f.dataDir, f.sessionId); expect(changes).toHaveLength(2);
+    const changes = await getChanges(f, f.sessionId); expect(changes).toHaveLength(2);
     expect(changes.find(c => path.isAbsolute(c.path))).toMatchObject({ before: 'outside original', after: 'outside agent', conflict: false });
-    const summary = await finishRunChanges(f.dataDir, f.sessionId, f.runId, f.projectPath);
+    const summary = await finishRunChanges(f, f.sessionId, f.runId);
     const external = summary.changes.find(c => path.isAbsolute(c.path)); expect(external).toMatchObject({ kind: 'modified' }); expect(external?.conflict).toBeFalsy();
-    await undoChange(f.dataDir, f.sessionId, path.join(f.outside, 'same.txt'));
+    await undoChange(f, f.sessionId, path.join(f.outside, 'same.txt'));
     expect(await fs.readFile(path.join(f.outside, 'same.txt'), 'utf8')).toBe('outside original');
     expect(await fs.readFile(path.join(f.projectPath, 'same.txt'), 'utf8')).toBe('project agent');
-    await expect(undoChange(f.dataDir, f.sessionId, path.join(f.outside, 'unknown.txt'))).rejects.toThrow('没有找到');
+    await expect(undoChange(f, f.sessionId, path.join(f.outside, 'unknown.txt'))).rejects.toThrow('没有找到');
   });
   it('denies an external write before changing files and full access avoids prompts', async () => {
     const f = await fixture(); const target = path.join(f.outside, 'new.txt'); let calls = 0;
@@ -187,9 +209,9 @@ describe('authorized external resources and read-only attachments', () => {
   });
   it('keeps private app data inaccessible even in full access and omits writes in plan mode', async () => {
     const f = await fixture(); const dataDir = path.join(f.projectPath, 'private-data'); await fs.mkdir(dataDir); await fs.writeFile(path.join(dataDir, 'key.txt'), 'private-secret');
-    const ctx = { ...f, dataDir, approvalMode: 'full' as const, maxResultChars: 1000, emit: () => {}, requestApproval: async () => true };
+    const ctx = { ...f, ...workspaceContext(f.projectPath, dataDir), approvalMode: 'full' as const, maxResultChars: 1000, emit: () => {}, requestApproval: async () => true };
     const tools = createWorkspaceTools(ctx); const read = tools.find(t => t.name === 'read_file')!;
-    await expect(read.execute('private', { path: 'private-data/key.txt' }, undefined, undefined, {} as never)).rejects.toThrow('私有数据');
+    await expect(read.execute('private', { path: 'private-data/key.txt' }, undefined, undefined, {} as never)).rejects.toThrow(/私有数据|受保护/);
     const search = await tools.find(t => t.name === 'search')!.execute('search', { query: 'private-secret' }, undefined, undefined, {} as never); expect(JSON.stringify(search)).not.toContain('private-secret');
     const plan = createWorkspaceTools({ ...ctx, workMode: 'plan' }); expect(plan.some(t => ['write_file', 'edit_file', 'powershell'].includes(t.name))).toBe(false); expect(plan.some(t => t.name === 'ask_question')).toBe(true); expect(plan.some(t => t.name === 'propose_plan')).toBe(true);
   });

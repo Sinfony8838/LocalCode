@@ -1,3 +1,4 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -17,7 +18,7 @@ async function setup(kind: 'anthropic' | 'openai' | 'responses') {
   await Promise.all([fs.mkdir(projectPath), fs.mkdir(dataDir)]); await fs.writeFile(path.join(projectPath, 'sample.txt'), 'fixture');
   const key = 'private-key-split-across-reasoning-fragments';
   const fixture = await providerFixture(key);
-  const req: RunRequest = { type: 'run', sessionId: 'session', runId: `run-${kind}`, projectPath, dataDir, prompt: 'fixture', provider: { id: 'fixture', name: 'fixture', kind, baseUrl: fixture.baseUrl, model: 'fixture-model', contextWindow: 8192, maxTokens: 1024, hasKey: true, apiKey: key } };
+  const req: RunRequest = { type: 'run', sessionId: 'session', runId: `run-${kind}`, ...workspaceContext(await fs.realpath(projectPath), dataDir), prompt: 'fixture', provider: { id: 'fixture', name: 'fixture', kind, baseUrl: fixture.baseUrl, model: 'fixture-model', contextWindow: 8192, maxTokens: 1024, hasKey: true, apiKey: key } };
   const events: AgentEvent[] = []; const engine = new AgentEngine(e => events.push(e));
   return { root, key, fixture, req, events, engine };
 }

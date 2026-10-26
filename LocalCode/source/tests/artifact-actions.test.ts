@@ -1,3 +1,4 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -22,15 +23,15 @@ async function fixture() {
   const project = await fs.mkdtemp(path.join(base, '.artifact-actions-')); roots.push(project);
   const filename = 'sample;$(echo injected).html'; const absolute = path.join(project, filename);
   await fs.writeFile(absolute, '<h1>hello</h1>');
-  return { project, filename, absolute, artifacts: new ArtifactController() };
+  return { project, context: workspaceContext(project, path.join(project, 'app-private', 'data')), filename, absolute, artifacts: new ArtifactController() };
 }
 
 describe('native artifact actions', () => {
   it('passes validated absolute filenames directly to open/reveal/clipboard', async () => {
     const f = await fixture();
-    await f.artifacts.action(f.project, f.filename, 'open');
-    await f.artifacts.action(f.project, f.filename, 'reveal');
-    await f.artifacts.action(f.project, f.filename, 'copy-path');
+    await f.artifacts.action(f.context, f.filename, 'open');
+    await f.artifacts.action(f.context, f.filename, 'reveal');
+    await f.artifacts.action(f.context, f.filename, 'copy-path');
     expect(native.openPath).toHaveBeenCalledExactlyOnceWith(f.absolute);
     expect(native.reveal).toHaveBeenCalledExactlyOnceWith(f.absolute);
     expect(native.clipboard).toHaveBeenCalledExactlyOnceWith(f.absolute);
@@ -43,12 +44,12 @@ describe('native artifact actions', () => {
     }
     for (const name of ['report%20final.txt', 'report final.txt', 'notes.txt#L12']) {
       const absolute = path.join(f.project, name);
-      const info = await f.artifacts.info(f.project, encodeURIComponent(name), 'reference');
+      const info = await f.artifacts.info(f.context, encodeURIComponent(name), 'reference');
       expect(info.path).toBe(name);
       for (const action of ['open', 'reveal', 'copy-path'] as const) {
-        await f.artifacts.action(f.project, name, action);
-        await f.artifacts.action(f.project, info.path, action);
-        await f.artifacts.action(f.project, pathToFileURL(absolute).href, action, 'reference');
+        await f.artifacts.action(f.context, name, action);
+        await f.artifacts.action(f.context, info.path, action);
+        await f.artifacts.action(f.context, pathToFileURL(absolute).href, action, 'reference');
       }
       expect(native.openPath).toHaveBeenLastCalledWith(absolute);
       expect(native.reveal).toHaveBeenLastCalledWith(absolute);
@@ -61,27 +62,27 @@ describe('native artifact actions', () => {
     const f = await fixture();
     const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
     native.spawn.mockImplementation(() => { queueMicrotask(() => child.emit('spawn')); return child; });
-    await f.artifacts.action(f.project, f.filename, 'choose-app');
+    await f.artifacts.action(f.context, f.filename, 'choose-app');
     expect(native.spawn).toHaveBeenCalledExactlyOnceWith(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'rundll32.exe'), ['shell32.dll,OpenAs_RunDLL', f.absolute], { shell: false, windowsHide: true, stdio: 'ignore' });
     expect(child.unref).toHaveBeenCalledOnce();
   });
   it.skipIf(process.platform === 'win32')('rejects application chooser on unsupported systems without spawning', async () => {
     const f = await fixture();
-    await expect(f.artifacts.action(f.project, f.filename, 'choose-app')).rejects.toThrow('Windows');
+    await expect(f.artifacts.action(f.context, f.filename, 'choose-app')).rejects.toThrow('Windows');
     expect(native.spawn).not.toHaveBeenCalled();
   });
   it('does not execute an executable script or an outside path through shell defaults', async () => {
     const f = await fixture(); await fs.writeFile(path.join(f.project, 'unsafe.cmd'), '@echo off');
-    await expect(f.artifacts.action(f.project, 'unsafe.cmd', 'open')).rejects.toThrow(/编辑器/);
-    await expect(f.artifacts.action(f.project, '../outside.html', 'open')).rejects.toThrow();
+    await expect(f.artifacts.action(f.context, 'unsafe.cmd', 'open')).rejects.toThrow(/编辑器/);
+    await expect(f.artifacts.action(f.context, '../outside.html', 'open')).rejects.toThrow();
     expect(native.openPath).not.toHaveBeenCalled(); expect(native.spawn).not.toHaveBeenCalled();
   });
   it('reports OS-open errors instead of claiming the file was opened', async () => {
     const f = await fixture(); native.openPath.mockResolvedValue('No associated app');
-    await expect(f.artifacts.action(f.project, f.filename, 'open')).rejects.toThrow(/No associated app/);
+    await expect(f.artifacts.action(f.context, f.filename, 'open')).rejects.toThrow(/No associated app/);
   });
   it('awaits native clipboard errors instead of reporting a completed copy', async () => {
     const f = await fixture(); native.clipboard.mockRejectedValueOnce(new Error('clipboard unavailable'));
-    await expect(f.artifacts.action(f.project, f.filename, 'copy-path')).rejects.toThrow('clipboard unavailable');
+    await expect(f.artifacts.action(f.context, f.filename, 'copy-path')).rejects.toThrow('clipboard unavailable');
   });
 });

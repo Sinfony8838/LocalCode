@@ -1,3 +1,4 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -18,26 +19,26 @@ async function fixture(original: string | null = 'const value=1;\n') {
   const root = await fs.mkdtemp(path.join(testBase, '.checkpoint-')); roots.push(root);
   const projectPath = path.join(root, 'project'); const dataDir = path.join(root, 'data');
   await fs.mkdir(projectPath);
-  const context = { projectPath, dataDir, sessionId: 'checkpoint-session', runId: 'first-run' };
+  const context = { ...workspaceContext(projectPath, dataDir), sessionId: 'checkpoint-session', runId: 'first-run' };
   const file = path.join(projectPath, 'code.ts');
   if (original !== null) await fs.writeFile(file, original);
   await writeWorkspaceText({ ...context, relativePath: 'code.ts', content: 'const value=2;\n' });
   const formatted = '\ufeffconst value = 2;\r\n'; await fs.writeFile(file, formatted);
   const journalPath = path.join(dataDir, 'changes', context.sessionId, 'index.json');
   const journal = async () => JSON.parse(await fs.readFile(journalPath, 'utf8'));
-  const preview = () => previewChangeCheckpoint(dataDir, context.sessionId, 'code.ts');
-  const checkpoint = (review: Awaited<ReturnType<typeof preview>>) => checkpointChange(dataDir, context.sessionId, 'code.ts', review.currentHash, review.recordHash);
+  const preview = () => previewChangeCheckpoint(context, context.sessionId, 'code.ts');
+  const checkpoint = (review: Awaited<ReturnType<typeof preview>>) => checkpointChange(context, context.sessionId, 'code.ts', review.currentHash, review.recordHash);
   return { ...context, root, file, formatted, journalPath, journal, preview, checkpoint };
 }
 
 describe('explicit external-edit checkpoints', () => {
   it.each(['const value=1;\n', null])('requires approval after rereading; undo preserves formatted bytes and archives old evidence (%s)', async original => {
     const f = await fixture(original);
-    const beforeJournal = await f.journal(); const beforeRun = await getRunToolChanges(f.dataDir, f.sessionId, f.runId);
-    expect((await getChanges(f.dataDir, f.sessionId))[0].conflict).toBe(true);
-    const current = await readWorkspaceText(f.projectPath, 'code.ts');
+    const beforeJournal = await f.journal(); const beforeRun = await getRunToolChanges(f, f.sessionId, f.runId);
+    expect((await getChanges(f, f.sessionId))[0].conflict).toBe(true);
+    const current = await readWorkspaceText(f, 'code.ts');
     await expect(writeWorkspaceText({ ...f, runId: 'second-run', relativePath: 'code.ts', expectedText: current, content: 'const value = 3;\n' })).rejects.toThrow(/新修改/);
-    await expect(undoChange(f.dataDir, f.sessionId, 'code.ts')).rejects.toThrow(/撤销冲突/);
+    await expect(undoChange(f, f.sessionId, 'code.ts')).rejects.toThrow(/撤销冲突/);
     const preview = await f.preview();
     expect(preview).toEqual({ path: 'code.ts', content: f.formatted, byteLength: Buffer.byteLength(f.formatted), currentHash: createHash('sha256').update(f.formatted).digest('hex'), recordHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
     expect(await f.journal()).toEqual(beforeJournal); // Merely previewing/canceling is read-only.
@@ -47,15 +48,15 @@ describe('explicit external-edit checkpoints', () => {
     expect(checkpointed.checkpoints).toHaveLength(1);
     expect(checkpointed.checkpoints[0]).toMatchObject({ previous: beforeJournal.records[0], approved: Buffer.from(f.formatted).toString('base64'), approvedHash: preview.currentHash });
     expect(checkpointed.runRecords).toEqual(beforeJournal.runRecords);
-    expect(await getRunToolChanges(f.dataDir, f.sessionId, f.runId)).toEqual(beforeRun);
-    expect((await getChanges(f.dataDir, f.sessionId))[0]).toMatchObject({ before: f.formatted, after: f.formatted, created: false, conflict: false });
+    expect(await getRunToolChanges(f, f.sessionId, f.runId)).toEqual(beforeRun);
+    expect((await getChanges(f, f.sessionId))[0]).toMatchObject({ before: f.formatted, after: f.formatted, created: false, conflict: false });
     await writeWorkspaceText({ ...f, runId: 'second-run', relativePath: 'code.ts', expectedText: f.formatted, content: 'const value = 3;\n' });
-    await undoChange(f.dataDir, f.sessionId, 'code.ts');
+    await undoChange(f, f.sessionId, 'code.ts');
     expect(await fs.readFile(f.file)).toEqual(Buffer.from(f.formatted));
-    expect(await getChanges(f.dataDir, f.sessionId)).toEqual([]);
+    expect(await getChanges(f, f.sessionId)).toEqual([]);
     const afterUndo = await f.journal();
     expect(afterUndo.checkpoints).toEqual(checkpointed.checkpoints);
-    expect(await getRunToolChanges(f.dataDir, f.sessionId, f.runId)).toEqual(beforeRun);
+    expect(await getRunToolChanges(f, f.sessionId, f.runId)).toEqual(beforeRun);
     expect(afterUndo.runRecords).toHaveLength(2);
   });
 
@@ -68,7 +69,7 @@ describe('explicit external-edit checkpoints', () => {
     await expect(f.checkpoint(newer)).rejects.toThrow(/修改记录在预览后已变化/);
     await fs.writeFile(f.file, 'even newer manual edit');
     await expect(writeWorkspaceText({ ...f, runId: 'second-run', relativePath: 'code.ts', content: 'BAD' })).rejects.toThrow(/新修改/);
-    await expect(undoChange(f.dataDir, f.sessionId, 'code.ts')).rejects.toThrow(/撤销冲突/);
+    await expect(undoChange(f, f.sessionId, 'code.ts')).rejects.toThrow(/撤销冲突/);
     expect(await fs.readFile(f.file, 'utf8')).toBe('even newer manual edit');
   });
 
@@ -103,10 +104,10 @@ describe('explicit external-edit checkpoints', () => {
     const nested = path.join(f.projectPath, 'nested'); await fs.mkdir(nested);
     await writeWorkspaceText({ ...f, relativePath: 'nested/code.ts', content: 'tool result' });
     await fs.writeFile(path.join(nested, 'code.ts'), f.formatted);
-    const nestedPreview = await previewChangeCheckpoint(f.dataDir, f.sessionId, 'nested/code.ts');
+    const nestedPreview = await previewChangeCheckpoint(f, f.sessionId, 'nested/code.ts');
     const beforeLink = await f.journal();
     await fs.unlink(path.join(nested, 'code.ts')); await fs.rmdir(nested); await fs.symlink(outside, nested, 'junction');
-    await expect(checkpointChange(f.dataDir, f.sessionId, 'nested/code.ts', nestedPreview.currentHash, nestedPreview.recordHash)).rejects.toThrow(/链接/);
+    await expect(checkpointChange(f, f.sessionId, 'nested/code.ts', nestedPreview.currentHash, nestedPreview.recordHash)).rejects.toThrow(/链接/);
     expect(await fs.readFile(path.join(outside, 'code.ts'), 'utf8')).toBe(f.formatted);
     expect(await f.journal()).toEqual(beforeLink);
     expect(beforeLink.checkpoints).toBeUndefined();

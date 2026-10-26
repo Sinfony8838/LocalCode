@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
+import { workspaceBoundary, type WorkspaceContext } from './workspace-context.js';
 import path from 'node:path';
 import type { AttachmentResource } from '../shared/contracts.js';
-import { normalizeRelative, resolveWorkspacePath } from './workspace.js';
+import { MAX_FILE_BYTES, normalizeRelative, readWorkspaceText, resolveWorkspacePath } from './workspace.js';
 
-export interface ResourceContext { projectPath: string; dataDir: string; attachments?: AttachmentResource[] }
+export interface ResourceContext extends WorkspaceContext { attachments?: AttachmentResource[] }
+export function resourceWorkspace(ctx: WorkspaceContext, root: string): WorkspaceContext { return { ...ctx, projectPath: root }; }
 export interface ResolvedResource { root: string; relative: string; absolute: string; displayPath: string; inWorkspace: boolean; attachment?: AttachmentResource }
 export function containsPath(root: string, value: string): boolean {
   const rel = path.relative(root, value);
@@ -23,6 +25,7 @@ async function canonicalTarget(input: string, allowMissing: boolean): Promise<st
 }
 /** User-selected attachments are read-only capabilities, never additional writable roots. */
 export async function resolveResource(ctx: ResourceContext, input: string, options: { directory?: boolean; write?: boolean; allowMissing?: boolean } = {}): Promise<ResolvedResource> {
+  if (ctx.projectPath) await workspaceBoundary(ctx);
   const alias = /^attachment:([^/\\]+)(?:[/\\](.*))?$/.exec(input);
   if (alias) {
     const attachment = ctx.attachments?.find(item => item.id === alias[1]);
@@ -33,7 +36,7 @@ export async function resolveResource(ctx: ResourceContext, input: string, optio
       const absolute = await fs.realpath(attachment.storagePath);
       return { root: path.dirname(absolute), relative: path.basename(absolute), absolute, displayPath: `attachment:${attachment.id}`, inWorkspace: true, attachment };
     }
-    const resolved = await resolveWorkspacePath(attachment.storagePath, alias[2] || '', options);
+    const resolved = await resolveWorkspacePath(resourceWorkspace(ctx, attachment.storagePath), alias[2] || '', options);
     if (containsPath(await canonicalTarget(ctx.dataDir, true), await fs.realpath(resolved.absolute))) throw new Error('不能将应用私有数据作为附件文件夹读取。');
     return { ...resolved, displayPath: `attachment:${attachment.id}${resolved.relative ? '/' + resolved.relative : ''}`, inWorkspace: true, attachment };
   }
@@ -41,7 +44,7 @@ export async function resolveResource(ctx: ResourceContext, input: string, optio
   let resolved: { root: string; relative: string; absolute: string };
   const projectRoot = await fs.realpath(ctx.projectPath);
   if (!path.isAbsolute(input)) {
-    resolved = await resolveWorkspacePath(projectRoot, input, options);
+    resolved = await resolveWorkspacePath(resourceWorkspace(ctx, projectRoot), input, options);
   } else {
     if (input.startsWith('\\\\') || input.includes('\0')) throw new Error('不支持网络路径或设备路径。');
     const parsed = path.parse(input);
@@ -49,13 +52,13 @@ export async function resolveResource(ctx: ResourceContext, input: string, optio
     const canonical = await canonicalTarget(path.resolve(input), !!options.allowMissing);
     const canonicalParsed = path.parse(canonical);
     normalizeRelative(canonical.slice(canonicalParsed.root.length), options.directory);
-    if (containsPath(projectRoot, canonical)) resolved = await resolveWorkspacePath(projectRoot, path.relative(projectRoot, canonical), options);
+    if (containsPath(projectRoot, canonical)) resolved = await resolveWorkspacePath(resourceWorkspace(ctx, projectRoot), path.relative(projectRoot, canonical), options);
     else {
       const root = options.directory ? canonical : await canonicalTarget(path.dirname(canonical), true);
       // Missing parent trees use the nearest existing directory as their guarded root.
       let existingRoot = root;
       while (!(await fs.stat(existingRoot).catch((e: any) => { if (e.code === 'ENOENT') return null; throw e; }))) existingRoot = path.dirname(existingRoot);
-      resolved = await resolveWorkspacePath(existingRoot, path.relative(existingRoot, canonical), options);
+      resolved = await resolveWorkspacePath(resourceWorkspace(ctx, existingRoot), path.relative(existingRoot, canonical), options);
     }
   }
   const absolute = await canonicalTarget(resolved.absolute, !!options.allowMissing);
@@ -80,4 +83,16 @@ export async function resolveResource(ctx: ResourceContext, input: string, optio
 export function childResource(parent: ResolvedResource, relative: string): string {
   if (parent.attachment) return `attachment:${parent.attachment.id}/${relative}`;
   return parent.inWorkspace ? relative : path.join(parent.root, relative);
+}
+
+/** Only opaque host-owned text copies may be read from private attachment storage. */
+export async function readResourceText(ctx: ResourceContext, resource: ResolvedResource): Promise<string> {
+  if (resource.attachment?.kind !== 'text') return readWorkspaceText(resourceWorkspace(ctx, resource.root), resource.relative);
+  const target = await resolveResource(ctx, `attachment:${resource.attachment.id}`);
+  if (target.absolute !== resource.absolute) throw new Error('Attachment path changed.');
+  const info = await fs.stat(target.absolute);
+  if (!info.isFile() || info.size > MAX_FILE_BYTES || info.nlink > 1) throw new Error('Invalid text attachment.');
+  const bytes = await fs.readFile(target.absolute);
+  if (bytes.length > MAX_FILE_BYTES || bytes.includes(0)) throw new Error('Invalid text attachment.');
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }

@@ -17,6 +17,7 @@ import { providerSchema, testConnection } from './providers';
 import { selectProviderModel } from '../shared/providers';
 import { translate } from '../shared/i18n';
 import { PetController } from './pets';
+import { workspaceBoundary, workspaceContext } from '../core/workspace-context';
 import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange, previewChangeCheckpoint, checkpointChange } from '../core/workspace';
 import { cleanupOwnedCommands } from '../core/command';
 import type { AgentEvent, AppEvent, ModelHealth, ProviderSecret, WorkerCommand, TransportMessage, TransportGrant, SendInput, GoalState, WorkMode } from '../shared/contracts';
@@ -201,7 +202,7 @@ async function startRun(arg: SendInput, automatic?: {goalId: string; revision: n
       active.clock.setActive(true);
     }
     check();
-    post(active, { type: 'run', runId: session.runId!, sessionId: session.id, projectPath: session.projectId ? store.project(session.projectId).path : '', dataDir,
+    post(active, { type: 'run', runId: session.runId!, sessionId: session.id, ...store.sessionWorkspace(session.id),
       piFile: session.piFile, provider: secret, prompt, locale, approvalMode: session.approvalMode, workMode: mode, grants: [...(sessionGrants.get(session.id) ?? [])],
       attachments: resources, newAttachmentIds: fresh.map(item => item.id), goal: goal ? {id: goal.id, objective: goal.objective} : undefined, automatic: !!automatic });
     emit({ type: 'state_changed' }); return {runId: session.runId!};
@@ -355,15 +356,15 @@ function assertChangesIdle() {
 /** Explicit UI file actions may open an external file only if this project's
  * journal already records that exact resource. This does not grant tool access. */
 async function artifactTarget(projectId: string, input: string, inputKind: 'path' | 'reference' = 'path') {
-  const root = store.project(projectId).path;
+  const root = store.workspace(projectId);
   try { const target = await resolveArtifactPath(root,input,inputKind); return {root,relative:target.relative,display:target.relative}; }
   catch (original) {
     if (!path.isAbsolute(input) || /[\0\r\n]/.test(input)) throw original;
     const absolute = path.resolve(input);
     for (const session of store.sessions().filter(s=>s.projectId===projectId)) {
-      const changes = await getChanges(dataDir,session.id);
+      const changes = await getChanges(store.sessionWorkspace(session.id),session.id);
       if (changes.some(change=>path.isAbsolute(change.path)&&path.resolve(change.path)===absolute)) {
-        const externalRoot = path.dirname(absolute); const relative = path.basename(absolute);
+        const externalRoot = workspaceContext(path.dirname(absolute), dataDir); const relative = path.basename(absolute);
         await resolveArtifactPath(externalRoot,relative);
         return {root:externalRoot,relative,display:absolute};
       }
@@ -450,7 +451,7 @@ async function invoke(method: string, arg: any) {
       }
       emit({type:'state_changed'}); return;
     }
-    case 'listFiles': return listWorkspaceFiles(store.project(arg.projectId).path, arg.directory || '');
+    case 'listFiles': return listWorkspaceFiles(store.workspace(arg.projectId), arg.directory || '');
     case 'readFile': { const target=await artifactTarget(arg.projectId,arg.path);return {...await readWorkspaceFile(target.root,target.relative),path:target.display}; }
     case 'artifactInfo': {
       const target=await artifactTarget(arg.projectId,arg.path,arg.inputKind); const info=await artifacts.info(target.root,target.relative);
@@ -459,16 +460,16 @@ async function invoke(method: string, arg: any) {
     }
     case 'artifactAction': { const target=await artifactTarget(arg.projectId,arg.path,arg.inputKind);return artifacts.action(target.root,target.relative,arg.action); }
     case 'openExternal': await shell.openExternal(externalBrowserUrl(arg)); return;
-    case 'changes': return store.session(arg).projectId ? getChanges(dataDir, arg) : [];
-    case 'previewCheckpoint': assertChangesIdle(); if (!store.session(arg.sessionId).projectId) throw new Error('此任务未指定工作区，没有可操作的项目文件。'); return previewChangeCheckpoint(dataDir, arg.sessionId, arg.path);
+    case 'changes': return store.session(arg).projectId ? getChanges(store.sessionWorkspace(arg), arg) : [];
+    case 'previewCheckpoint': assertChangesIdle(); if (!store.session(arg.sessionId).projectId) throw new Error('此任务未指定工作区，没有可操作的项目文件。'); return previewChangeCheckpoint(store.sessionWorkspace(arg.sessionId), arg.sessionId, arg.path);
     case 'undo':
     case 'checkpoint': {
       assertChangesIdle(); if (!store.session(arg.sessionId).projectId) throw new Error('此任务未指定工作区，没有可操作的项目文件。');
       // Reserve synchronously, before any await, so a new send cannot race this operation.
       changingFiles = true;
       try {
-        if (method === 'undo') await undoChange(dataDir, arg.sessionId, arg.path);
-        else await checkpointChange(dataDir, arg.sessionId, arg.path, arg.expectedHash, arg.expectedRecordHash);
+        if (method === 'undo') await undoChange(store.sessionWorkspace(arg.sessionId), arg.sessionId, arg.path);
+        else await checkpointChange(store.sessionWorkspace(arg.sessionId), arg.sessionId, arg.path, arg.expectedHash, arg.expectedRecordHash);
         emit({ type: 'state_changed' });
       } finally { changingFiles = false; }
       return;

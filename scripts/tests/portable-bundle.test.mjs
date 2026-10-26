@@ -45,8 +45,8 @@ test('portable first-run guide covers bilingual cloud setup, prerequisites and d
   assert.match(guide, /^LocalCode 0\.1\.14 — Windows x64\r\n/);
   assert.doesNotMatch(guide, /(?<!\r)\n/, 'Windows text guide uses CRLF throughout');
   for (const required of [
-    /RELEASE HOLD:[\s\S]*not recommended releases[\s\S]*OPEN THE PORTABLE DESKTOP/,
-    /发布暂停：[\s\S]*此前验证构建不作为推荐发行版/,
+    /WINDOWS PORTABLE RELEASE[\s\S]*SHA256SUMS.txt[\s\S]*OPEN THE PORTABLE DESKTOP/,
+    /Windows 便携发行版[\s\S]*校验后完整解压/,
     /Code > Download ZIP is source, not this runnable package/,
     /Code > Download ZIP 是源码，不是便携程序/,
     /Windows 11 x64[\s\S]*ARM64, 32-bit Windows/,

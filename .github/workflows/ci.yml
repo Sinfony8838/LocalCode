@@ -37,8 +37,8 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: .\scripts\Test-Setup.ps1
-      - name: Test portable package allowlist
-        run: node --test scripts/tests/portable-bundle.test.mjs
+      - name: Test portable allowlist and restricted-policy acceptance launcher
+        run: node --test scripts/tests/portable-bundle.test.mjs scripts/tests/acceptance-launcher.test.mjs
       - run: npm ci
         working-directory: LocalCode/source
       - run: npm run typecheck
@@ -85,6 +85,11 @@ jobs:
         continue-on-error: true
         run: node scripts/acceptance-checkpoint.mjs
         working-directory: LocalCode/source
+      - name: Verify application-data isolation in Electron
+        id: isolation_ui
+        continue-on-error: true
+        run: node scripts/acceptance-isolation.mjs
+        working-directory: LocalCode/source
       - name: Verify interface languages and persisted reply preferences
         id: language_ui
         continue-on-error: true
@@ -103,6 +108,8 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           node scripts/acceptance-artifacts.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/acceptance-isolation.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/acceptance-typography.mjs "../app/releases/$version/LocalCode-win32-x64/LocalCode.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -146,7 +153,7 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ steps.pet_skill.outcome }}' -ne 'success') { throw 'Desktop pet image API helper tests must pass.' }
-          if ('${{ steps.setup51.outcome }}' -ne 'success' -or '${{ steps.setup7.outcome }}' -ne 'success' -or '${{ steps.unit_tests.outcome }}' -ne 'success' -or '${{ steps.artifact_ui.outcome }}' -ne 'success' -or '${{ steps.model_ui.outcome }}' -ne 'success' -or '${{ steps.agent_modes_ui.outcome }}' -ne 'success' -or '${{ steps.task_projects_ui.outcome }}' -ne 'success' -or '${{ steps.typography_ui.outcome }}' -ne 'success' -or '${{ steps.checkpoint_ui.outcome }}' -ne 'success' -or '${{ steps.language_ui.outcome }}' -ne 'success' -or '${{ steps.packaged_ui.outcome }}' -ne 'success') {
+          if ('${{ steps.setup51.outcome }}' -ne 'success' -or '${{ steps.setup7.outcome }}' -ne 'success' -or '${{ steps.unit_tests.outcome }}' -ne 'success' -or '${{ steps.artifact_ui.outcome }}' -ne 'success' -or '${{ steps.model_ui.outcome }}' -ne 'success' -or '${{ steps.isolation_ui.outcome }}' -ne 'success' -or '${{ steps.agent_modes_ui.outcome }}' -ne 'success' -or '${{ steps.task_projects_ui.outcome }}' -ne 'success' -or '${{ steps.typography_ui.outcome }}' -ne 'success' -or '${{ steps.checkpoint_ui.outcome }}' -ne 'success' -or '${{ steps.language_ui.outcome }}' -ne 'success' -or '${{ steps.packaged_ui.outcome }}' -ne 'success') {
             throw 'All setup, unit, source desktop and packaged desktop suites must pass. No download is published on failure.'
           }
       - name: Retain tested Windows download

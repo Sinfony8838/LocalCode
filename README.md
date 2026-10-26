@@ -2,7 +2,7 @@
 
 # LocalCode
 
-Version 0.2.0 adds three approval modes, image/text/read-only-folder attachments, interactive planning, and persistent goals for external models. Goals default to two hours of active work with pause/resume and editable budgets; local Ollama goals are disabled. External models no longer have a fixed twelve-tool limit. The neutral light/dark UI preserves the four interface languages, model setup, and checkpoints. See the [usage guide](LocalCode/source/docs/AGENT_MODES.md) and [implementation provenance](LocalCode/source/THIRD_PARTY_NOTICES.md). These source changes do not lift the release hold described below.
+Version 0.2.0 adds three approval modes, image/text/read-only-folder attachments, interactive planning, and persistent goals for external models. Goals default to two hours of active work with pause/resume and editable budgets; local Ollama goals are disabled. External models no longer have a fixed twelve-tool limit. The neutral light/dark UI preserves the four interface languages, model setup, and checkpoints. See the [usage guide](LocalCode/source/docs/AGENT_MODES.md) and [implementation provenance](LocalCode/source/THIRD_PARTY_NOTICES.md). Version 0.2.1 also integrates application-data isolation for file tools, previews, undo and checkpoints.
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -16,7 +16,7 @@ Tasks can start without a project folder. Choose a workspace above the composer 
 
 Conversation text uses the system sans-serif font, with a 14 px default size, 24 px line height, and 12 px paragraph spacing. Font size remains adjustable in Settings → Appearance. Stop status and elapsed time share one line; completed runs show elapsed time before the final reply. File cards show three files initially and expand to reveal the rest. Routine coverage notes are hidden, while actual statistics errors remain visible.
 
-> **Release hold:** the known application-data isolation issue remains unresolved. Previous validation artifacts are not recommended releases; passing build or onboarding checks does not establish release readiness.
+> **Windows download:** [LocalCode 0.2.1 — Windows x64 portable ZIP](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.1). Verify `SHA256SUMS.txt`, extract the complete folder, then run `Start.cmd`. Existing installations should be backed up and updates extracted into a new folder; see below.
 
 ## Interface and reply language
 
@@ -49,7 +49,7 @@ Opening LocalCode does not install your project's language runtimes or build too
 
 ### Prebuilt portable desktop: extract and open
 
-A successful **Source checks** workflow produces the **`LocalCode-windows-x64`** Actions artifact. Downloading an Actions artifact requires a GitHub sign-in. The artifact contains `LocalCode-0.1.22-windows-x64.zip` and `SHA256SUMS.txt`; extract the artifact first, then extract the inner application ZIP. A workflow artifact is a validation build, **not a published GitHub Release**; availability depends on that workflow completing successfully and its retention period.
+Download **`LocalCode-0.2.1-windows-x64.zip`** and **`SHA256SUMS.txt`** from the [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.1). No GitHub sign-in is needed for public release assets. Check the ZIP with `Get-FileHash -Algorithm SHA256`, extract the complete application folder and run `Start.cmd`. The Source code ZIP requires building and is a different download. Actions artifacts remain temporary validation builds; they require sign-in and contain an inner application ZIP.
 
 1. Double-click the extracted **`Start.cmd`**. No build tools or model downloads are needed to open the desktop.
 2. Choose your connection in Settings:

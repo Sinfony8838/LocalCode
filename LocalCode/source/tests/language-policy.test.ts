@@ -6,6 +6,7 @@ import os from 'node:os';
 import { AgentEngine, agentSystemPrompt, finalSummaryPrompt, isolatedResourceLoader, responseLanguagePolicy } from '../src/agent/engine';
 import type { AgentEvent, RunRequest } from '../src/shared/contracts';
 import { APP_LOCALES, type AppLocale } from '../src/shared/i18n';
+import { workspaceContext } from '../src/core/workspace-context';
 
 const temporary: string[] = [];
 afterEach(async () => { for (const root of temporary.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -46,7 +47,7 @@ describe('interaction language policy', () => {
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture address');
     const events: AgentEvent[] = [];
     const engine = new AgentEngine(event => events.push(event));
-    const base: RunRequest = { type: 'run', runId: 'language-0', sessionId: 'language-session', projectPath: projectless ? '' : await realpath(project), dataDir: data, prompt: '请介绍这个项目',
+    const base: RunRequest = { type: 'run', runId: 'language-0', sessionId: 'language-session', ...workspaceContext(projectless ? '' : await realpath(project), data), prompt: '请介绍这个项目',
       provider: { id: 'mock', name: 'Mock', kind: 'openai', baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'mock-model', contextWindow: 8192, maxTokens: 1024, hasKey: true, apiKey: 'language-fixture-key' } };
     const prompts = ['请介绍这个项目', '请继续介绍', '请用英文回复这个中文问题', 'Explain the code'];
     let piFile: string | undefined;

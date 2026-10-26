@@ -1,7 +1,8 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { describe, expect, it, vi } from 'vitest';
 import { createSkillTool } from '../src/agent/skills';
 
-const context = () => ({ projectPath: 'D:/project', dataDir: 'D:/data', sessionId: 's', runId: 'r', maxResultChars: 1000,
+const context = () => ({ ...workspaceContext('D:/project', 'D:/data'), sessionId: 's', runId: 'r', maxResultChars: 1000,
   emit: vi.fn(), requestApproval: vi.fn(), beforeTool: vi.fn() });
 
 describe('bundled desktop pet skill', () => {

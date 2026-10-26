@@ -1,3 +1,4 @@
+import { workspaceContext } from '../core/workspace-context';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -63,7 +64,7 @@ export class AttachmentStore {
       if ((await fs.lstat(cursor)).isSymbolicLink()) throw new Error('附件不能通过符号链接或目录联接导入。');
     }
     const actual = await fs.realpath(normalized), data = await fs.realpath(this.dataDir);
-    if (inside(data, actual) || directory && inside(actual, data)) throw new Error('不能添加应用内部数据或包含应用数据的文件夹。');
+    if ((await Promise.all(workspaceContext('', this.dataDir).protectedRoots.map(root => fs.realpath(root).catch(error => { if (error.code === 'ENOENT') return path.resolve(root); throw error; })))).some(root => inside(root, actual) || directory && inside(actual, root))) throw new Error('不能添加应用内部数据或包含应用数据的文件夹。');
     const stat = await fs.stat(actual);
     if (directory ? !stat.isDirectory() : !stat.isFile()) throw new Error(directory ? '请选择文件夹。' : '请选择普通文件。');
     if (!directory && stat.nlink > 1) throw new Error('不支持导入多重硬链接文件。');
