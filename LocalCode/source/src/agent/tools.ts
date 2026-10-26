@@ -1,3 +1,5 @@
+import { readResourceText, resourceWorkspace } from '../core/resources.js';
+import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { randomUUID } from 'node:crypto';
 import { Type, type TSchema } from 'typebox';
@@ -10,9 +12,7 @@ import { evaluatePermission } from '../core/permissions.js';
 
 export type ApprovalRequest = Omit<Approval, 'id' | 'runId' | 'sessionId'>;
 
-export interface WorkspaceToolContext {
-  projectPath: string;
-  dataDir: string;
+export interface WorkspaceToolContext extends WorkspaceContext {
   sessionId: string;
   runId: string;
   maxResultChars: number;
@@ -87,12 +87,12 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
         if (!directory && !ctx.projectPath) return result((ctx.attachments ?? []).filter(a => a.kind !== 'image').map(a => `${a.kind === 'folder' ? '[目录]' : '[文件]'} attachment:${a.id} (${a.name})`).join('\n') || '没有可读取的附件。');
         const resource = await resolve(directory, { directory: true }, _id, signal);
         if (args.recursive) {
-          const found = await walkWorkspaceFiles(resource.root, resource.relative, 500);
+          const found = await walkWorkspaceFiles(resourceWorkspace(ctx, resource.root), resource.relative, 500);
           const entries = []; for (const file of found) { try { await resolveResource(ctx, childResource(resource, file)); entries.push(file); } catch { /* Private data and unsafe paths are omitted. */ } }
           ensureActive(signal);
           return result(entries.map(entry => childResource(resource, entry)).join('\n') + (entries.length >= 500 ? '\n[最多返回 500 个文件，请缩小目录范围。]' : '') || '目录中没有可读取的文件。');
         }
-        const found = await listWorkspaceFiles(resource.root, resource.relative);
+        const found = await listWorkspaceFiles(resourceWorkspace(ctx, resource.root), resource.relative);
         const entries = []; for (const entry of found) { try { await resolveResource(ctx, childResource(resource, entry.path), { directory: entry.directory }); entries.push(entry); } catch { /* Private data and unsafe paths are omitted. */ } }
         ensureActive(signal);
         return result(entries.map(entry => `${entry.directory ? '[目录]' : '[文件]'} ${childResource(resource, entry.path)}`).join('\n') || '目录为空。');
@@ -104,7 +104,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
       async execute(_id, args, signal) {
         begin('read_file', args, signal);
         const resource = await resolve(args.path as string, {}, _id, signal);
-        const text = await readWorkspaceText(resource.root, resource.relative); ensureActive(signal);
+        const text = await readResourceText(ctx, resource); ensureActive(signal);
         const lines = text.split(/\r?\n/); const start = (args.startLine as number | undefined) ?? 1; const count = (args.maxLines as number | undefined) ?? 100;
         if (start > lines.length) return result(`文件共 ${lines.length} 行，起始行超出范围。`);
         const selected = lines.slice(start - 1, start - 1 + count).map((line, index) => `${start + index}: ${line}`).join('\n');
@@ -118,7 +118,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
         begin('search', args, signal);
         const input = String(args.path ?? ''); const attachment = ctx.attachments?.find(a => input === `attachment:${a.id}` && a.kind === 'text');
         const resource = await resolve(input, { directory: !attachment }, _id, signal);
-        const query = String(args.query).toLowerCase(); const entries = attachment ? [resource.relative] : await walkWorkspaceFiles(resource.root, resource.relative, 1500); const hits: string[] = [];
+        const query = String(args.query).toLowerCase(); const entries = attachment ? [resource.relative] : await walkWorkspaceFiles(resourceWorkspace(ctx, resource.root), resource.relative, 1500); const hits: string[] = [];
         for (const file of entries) {
           ensureActive(signal);
           const display = attachment ? resource.displayPath : childResource(resource, file);
@@ -126,7 +126,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
           if (args.mode === 'path') { if (display.toLowerCase().includes(query)) hits.push(display); }
           else {
             try {
-              const text = await readWorkspaceText(resource.root, file);
+              const text = await readResourceText(ctx, { ...resource, relative: file });
               if (text.length > 256_000) continue;
               for (const [index, line] of text.split(/\r?\n/).entries()) { if (line.toLowerCase().includes(query)) hits.push(`${display}:${index + 1}: ${line.slice(0, 300)}`); if (hits.length >= 40) break; }
             } catch { /* Binary, large, inaccessible, and unsafe files are excluded. */ }
@@ -142,13 +142,13 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
       async execute(_id, args, signal) {
         begin('edit_file', args, signal);
         const resource = await resolve(args.path as string, {}, _id, signal);
-        const text = await readWorkspaceText(resource.root, resource.relative); const oldText = args.oldText as string; const index = text.indexOf(oldText);
+        const text = await readResourceText(ctx, resource); const oldText = args.oldText as string; const index = text.indexOf(oldText);
         if (index < 0) throw new Error('oldText 与文件不匹配，未修改。请重新读取并使用精确文本。');
         if (text.indexOf(oldText, index + 1) !== -1) throw new Error('oldText 出现多次，未修改。请提供更多上下文，使匹配唯一。');
         ensureActive(signal);
         const checked = await resolve(args.path as string, { write: true }, _id, signal, `替换：\n${oldText}\n为：\n${args.newText}`);
         if (checked.absolute !== resource.absolute) throw new Error('读取后资源路径发生变化，未修改。');
-        await writeWorkspaceText({ ...ctx, projectPath: checked.root, relativePath: checked.relative, displayPath: checked.displayPath, content: text.slice(0, index) + String(args.newText) + text.slice(index + oldText.length), expectedText: text });
+        await writeWorkspaceText({ ...ctx, resourceRoot: checked.root, relativePath: checked.relative, displayPath: checked.displayPath, content: text.slice(0, index) + String(args.newText) + text.slice(index + oldText.length), expectedText: text });
         changed(); return result(`已修改 ${args.path}，原始内容已保存，可在差异面板撤销。`);
       },
     }),
@@ -158,7 +158,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
       async execute(_id, args, signal) {
         begin('write_file', args, signal); ensureActive(signal);
         const resource = await resolve(args.path as string, { write: true, allowMissing: true }, _id, signal, String(args.content));
-        await writeWorkspaceText({ ...ctx, projectPath: resource.root, relativePath: resource.relative, displayPath: resource.displayPath, content: args.content as string });
+        await writeWorkspaceText({ ...ctx, resourceRoot: resource.root, relativePath: resource.relative, displayPath: resource.displayPath, content: args.content as string });
         changed(); return result(`已写入 ${args.path}，修改记录已保存。`);
       },
     }),

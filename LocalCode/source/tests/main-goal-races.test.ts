@@ -9,7 +9,7 @@ import { selectProviderModel } from '../src/shared/providers';
 
 // Execute the actual main-process functions with inert Electron/disk adapters.
 // Deferred persistence exposes races that normal, fast disk writes conceal.
-const mainSource=fs.readFileSync(path.resolve('src/main/main.ts'),'utf8').replace(/\n}\ntry \{ initializeApplication\(\); }/, '\n(globalThis as any).testMain={invoke,runs,starting,sessionGrants,userRevisions,continuations,scheduleContinuation};\n}\ntry { initializeApplication(); }');
+const mainSource=fs.readFileSync(path.resolve('src/main/main.ts'),'utf8').replaceAll('\r\n','\n').replace(/\n}\ntry \{ initializeApplication\(\); }/, '\n(globalThis as any).testMain={invoke,runs,starting,sessionGrants,userRevisions,continuations,scheduleContinuation};\n}\ntry { initializeApplication(); }');
 const compiled = transformSync(mainSource,{loader:'ts',format:'cjs',target:'es2022'}).code;
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done=>{resolve=done;}); return {promise,resolve}; };
 function harness() {

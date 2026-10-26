@@ -1,3 +1,4 @@
+import { workspaceContext } from '../src/core/workspace-context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +27,7 @@ async function fixture() {
   const begin = async () => {
     const started = await store.beginRun(session.id, '处理文件并验证', 'local');
     const identity = { sessionId: session.id, runId: started.runId! };
-    const write = (relativePath: string, content: string) => writeWorkspaceText({ ...identity, projectPath, dataDir: store.dataDir, relativePath, content });
+    const write = (relativePath: string, content: string) => writeWorkspaceText({ ...identity, ...store.sessionWorkspace(session.id), relativePath, content });
     const event = (body: Record<string, unknown>) => store.event({ ...identity, ...body } as AgentEvent);
     const finish = async (status: 'completed' | 'failed' | 'interrupted' = 'completed') => {
       const settled = await event({ type: 'settled', status });
@@ -99,8 +100,8 @@ describe('per-run file evidence', () => {
     const { summary } = await run.finish(status);
     expect(observed).toEqual([baseline]);
     await expect(fs.access(baseline)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await getChanges(f.store.dataDir, f.session.id)).toEqual([expect.objectContaining({ path: 'dirty.txt', before: 'original\n', after: 'changed\n' })]);
-    await undoChange(f.store.dataDir, f.session.id, 'dirty.txt');
+    expect(await getChanges(f.store.sessionWorkspace(f.session.id), f.session.id)).toEqual([expect.objectContaining({ path: 'dirty.txt', before: 'original\n', after: 'changed\n' })]);
+    await undoChange(f.store.sessionWorkspace(f.session.id), f.session.id, 'dirty.txt');
     expect(await fs.readFile(path.join(f.projectPath, 'dirty.txt'), 'utf8')).toBe('original\n');
     const reopened = new Store(f.store.dataDir); await reopened.init();
     expect(reopened.session(f.session.id).runs![0]).toEqual(summary);
@@ -149,7 +150,7 @@ describe('per-run file evidence', () => {
     const reopened = new Store(f.store.dataDir); await reopened.init();
     expect(reopened.session(f.session.id).runs![0]).toEqual(summary);
     await expect(fs.access(baseline)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await getChanges(f.store.dataDir, f.session.id)).toHaveLength(1);
+    expect(await getChanges(f.store.sessionWorkspace(f.session.id), f.session.id)).toHaveLength(1);
   });
 
   it('retires replaced rounds without deleting the new active baseline or either tool journal', async () => {
@@ -163,7 +164,7 @@ describe('per-run file evidence', () => {
     await second.finish();
     await expect(fs.access(baselinePath(f, second.runId))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await fs.readFile(unrelated, 'utf8')).toBe('unsettled evidence');
-    await undoChange(f.store.dataDir, f.session.id, 'first.txt');
+    await undoChange(f.store.sessionWorkspace(f.session.id), f.session.id, 'first.txt');
     await expect(fs.access(path.join(f.projectPath, 'first.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -195,15 +196,15 @@ describe('per-run file evidence', () => {
     expect(firstSummary.changes).toHaveLength(2);
     expect(firstSummary.changes.find(change => change.path.toLowerCase() === 'readme.md')).toMatchObject({ kind: 'modified', additions: 2, deletions: 0 });
     expect(firstSummary.changes.find(change => change.path.toLowerCase() === 'new.txt')).toMatchObject({ kind: 'created', additions: 1, deletions: 0 });
-    expect(await getChanges(f.store.dataDir, f.session.id)).toHaveLength(2);
+    expect(await getChanges(f.store.sessionWorkspace(f.session.id), f.session.id)).toHaveLength(2);
     const second = await f.begin(); await second.write('rEaDmE.mD', 'original\nsecond\nthird\nfourth\n');
     expect((await second.finish()).summary.changes).toEqual([expect.objectContaining({ kind: 'modified', additions: 1, deletions: 0 })]);
     expect(f.store.session(f.session.id).runs![0]).toEqual(firstSummary);
-    await undoChange(f.store.dataDir, f.session.id, 'rEaDmE.Md');
+    await undoChange(f.store.sessionWorkspace(f.session.id), f.session.id, 'rEaDmE.Md');
     expect(await fs.readFile(path.join(f.projectPath, 'README.md'), 'utf8')).toBe('original\n');
-    await undoChange(f.store.dataDir, f.session.id, 'new.TXT');
+    await undoChange(f.store.sessionWorkspace(f.session.id), f.session.id, 'new.TXT');
     await expect(fs.stat(path.join(f.projectPath, 'NEW.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await getChanges(f.store.dataDir, f.session.id)).toEqual([]);
+    expect(await getChanges(f.store.sessionWorkspace(f.session.id), f.session.id)).toEqual([]);
   });
 
   it('deduplicates repeated writes and compares the next round to its own starting bytes without changing cumulative undo', async () => {
@@ -220,7 +221,7 @@ describe('per-run file evidence', () => {
     const next = (await second.finish()).summary;
     expect(next.changes).toEqual([expect.objectContaining({ path: 'dirty.txt', kind: 'modified', additions: 1, deletions: 0 })]);
     expect(f.store.session(f.session.id).runs![0]).toEqual(original);
-    expect((await getChanges(f.store.dataDir, f.session.id)).find(change => change.path === 'dirty.txt')?.before).toBe('用户未提交的内容\n');
+    expect((await getChanges(f.store.sessionWorkspace(f.session.id), f.session.id)).find(change => change.path === 'dirty.txt')?.before).toBe('用户未提交的内容\n');
     const reopened = new Store(f.store.dataDir); await reopened.init();
     expect(reopened.session(f.session.id).runs).toEqual([original, next]);
   });

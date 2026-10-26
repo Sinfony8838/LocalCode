@@ -14,9 +14,9 @@ export const supportFiles = [
 function portableReadme(version) {
   return `LocalCode ${version} — Windows x64
 
-RELEASE HOLD: the known application-data isolation issue remains unresolved.
-Previous validation artifacts are not recommended releases. Passing build or
-onboarding checks does not establish release readiness.
+WINDOWS PORTABLE RELEASE
+Download the Windows x64 ZIP and SHA256SUMS.txt from the official GitHub Release.
+Verify the archive checksum, then extract this entire folder before opening.
 
 OPEN THE PORTABLE DESKTOP
 1. Use Windows 11 x64 (Windows 10 22H2 x64 is an untested compatibility target).
@@ -78,8 +78,8 @@ another Windows account/computer. Never upload runtime data, keys or private
 conversations in a bug report. Read SECURITY.md before using important files.
 
 中文快速开始
-发布暂停：已知的应用数据隔离问题尚未解决；此前验证构建不作为推荐发行版。
-构建或首次配置检查通过，不代表已经满足发布条件。
+Windows 便携发行版
+请从官方 GitHub Release 下载 Windows x64 ZIP 与 SHA256SUMS.txt，校验后完整解压。
 
 打开桌面
 1. 使用 Windows 11 x64；Windows 10 22H2 x64 属于未实测的兼容目标。

@@ -1,3 +1,4 @@
+import { workspaceBoundary, type WorkspaceContext } from '../core/workspace-context.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync } from 'node:fs';
 import { mkdir, realpath, stat, readFile } from 'node:fs/promises';
@@ -528,12 +529,13 @@ export class AgentEngine {
       this.send(run, { type: 'status', status: 'running' });
       const request = run.request;
       if (request.goal && request.provider.kind === 'ollama') throw new Error('本地 Ollama 不支持目标模式，请选择外部模型。');
+      if (request.projectPath) await workspaceBoundary(request);
       const logs = path.join(request.dataDir, 'logs'); await mkdir(logs, { recursive: true });
       run.logFile = path.join(logs, `agent-${request.runId}.jsonl`);
       this.log(run, { type: 'run_start', sessionId: request.sessionId, model: request.provider.model,
         contextWindow: request.provider.contextWindow, maxTokens: request.provider.maxTokens });
       run.controller.signal.throwIfAborted();
-      const context: EngineToolContext = { projectPath: request.projectPath, dataDir: request.dataDir,
+      const context: EngineToolContext = { projectPath: request.projectPath, dataDir: request.dataDir, protectedRoots: request.protectedRoots,
         approvalMode: request.approvalMode, workMode: request.workMode, grants: request.grants, attachments: request.attachments,
         goal: request.provider.kind !== 'ollama' ? request.goal : undefined,
         sessionId: request.sessionId, runId: request.runId,

@@ -1,3 +1,4 @@
+import { workspaceBoundary, type WorkspaceContext } from './workspace-context';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -27,7 +28,7 @@ const assetTypes: Record<string, string> = {
 };
 
 /** Links are data: only project-contained filesystem references may reach the OS. */
-export async function resolveArtifactPath(projectPath: string, input: string, inputKind: ArtifactInputKind = 'path') {
+export async function resolveArtifactPath(ctx: WorkspaceContext, input: string, inputKind: ArtifactInputKind = 'path') {
   if (typeof input !== 'string' || !input || input.length > 4096 || /[\0\r\n]/.test(input)) throw new Error('无效的文件路径。');
   let candidate = input;
   if (inputKind === 'reference') {
@@ -46,9 +47,9 @@ export async function resolveArtifactPath(projectPath: string, input: string, in
     if (process.platform === 'win32' && /^\/[a-z]:[\\/]/i.test(candidate)) candidate = candidate.slice(1);
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(candidate) && !/^[a-z]:[\\/]/i.test(candidate)) throw new Error('此操作只接受本地文件。');
-  const root = await fs.realpath(projectPath);
+  const { root } = await workspaceBoundary(ctx);
   if (path.isAbsolute(candidate)) candidate = path.relative(root, path.resolve(candidate));
-  return resolveWorkspacePath(root, normalizeRelative(candidate));
+  return resolveWorkspacePath(ctx, normalizeRelative(candidate));
 }
 
 export function artifactKind(filename: string): ArtifactKind {
@@ -66,9 +67,9 @@ function privateAsset(relative: string) {
 
 /** One unguessable origin per preview; no app-origin privileges, IPC, network, forms or top navigation. */
 export class ArtifactPreviews {
-  private grants = new Map<string, string>();
-  async info(projectPath: string, input: string, inputKind: ArtifactInputKind = 'path'): Promise<ArtifactInfo> {
-    const target = await resolveArtifactPath(projectPath, input, inputKind);
+  private grants = new Map<string, WorkspaceContext>();
+  async info(ctx: WorkspaceContext, input: string, inputKind: ArtifactInputKind = 'path'): Promise<ArtifactInfo> {
+    const target = await resolveArtifactPath(ctx, input, inputKind);
     const stat = await fs.stat(target.absolute);
     const kind = artifactKind(target.relative);
     const result: ArtifactInfo = { path: target.relative, absolutePath: target.absolute, name: path.basename(target.absolute), kind, size: stat.size, canOpenExternally: !activeExtensions.has(path.extname(target.relative).toLowerCase()) };
@@ -76,7 +77,7 @@ export class ArtifactPreviews {
     // sandbox. Keep PDFs available through the explicit system-opening actions.
     if (['html', 'image'].includes(kind) && stat.size <= MAX_PREVIEW_BYTES && !privateAsset(target.relative)) {
       const token = randomUUID();
-      this.grants.set(token, target.root);
+      this.grants.set(token, { projectPath: ctx.projectPath, dataDir: ctx.dataDir, protectedRoots: [...ctx.protectedRoots] });
       // An open preview is replaceable by reopening the artifact, so bound retained capabilities.
       while (this.grants.size > 128) this.grants.delete(this.grants.keys().next().value!);
       result.previewUrl = `${PREVIEW_SCHEME}://${token}/${target.relative.split('/').map(encodeURIComponent).join('/')}`;
@@ -86,13 +87,14 @@ export class ArtifactPreviews {
   async response(request: Pick<Request, 'url' | 'method'>): Promise<Response> {
     try {
       const url = new URL(request.url);
-      const root = this.grants.get(url.hostname);
-      if (url.protocol !== `${PREVIEW_SCHEME}:` || !root || request.method !== 'GET' || url.username || url.password || url.port) return new Response('Forbidden', { status: 403 });
+      const ctx = this.grants.get(url.hostname);
+      if (url.protocol !== `${PREVIEW_SCHEME}:` || !ctx || request.method !== 'GET' || url.username || url.password || url.port) return new Response('Forbidden', { status: 403 });
+      const { root } = await workspaceBoundary(ctx);
       const relative = normalizeRelative(decodeURIComponent(url.pathname.slice(1)));
       if (privateAsset(relative)) return new Response('Forbidden', { status: 403 });
       const type = assetTypes[path.extname(relative).toLowerCase()];
       if (!type) return new Response('Unsupported preview resource', { status: 415 });
-      const target = await resolveWorkspacePath(root, relative);
+      const target = await resolveWorkspacePath(ctx, relative);
       // Recheck the real target: an in-project alias must not expose hidden metadata.
       const canonical = await fs.realpath(target.absolute);
       if (privateAsset(path.relative(root, canonical).split(path.sep).join('/'))) return new Response('Forbidden', { status: 403 });

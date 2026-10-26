@@ -32,7 +32,7 @@ try {
   await fs.access(releaseDir);
   if ((await fs.readFile(marker, 'utf8')).trim() !== digest) throw new Error(`Release ${version} contains another build. Bump the version; existing files were preserved.`);
   await fs.access(path.join(releaseDir, 'LocalCode-win32-x64/LocalCode.exe'));
-  await fs.writeFile('../app/current.txt', `releases\\${version}\\LocalCode-win32-x64\r\n`);
+  if (process.env.LOCALCODE_DEFER_ACTIVATION !== '1') await fs.writeFile('../app/current.txt', `releases\\${version}\\LocalCode-win32-x64\r\n`);
   console.log('Identical release already packaged. Reused existing build.');
   process.exit(0);
 } catch (error) { if (error.code !== 'ENOENT') throw error; if (await fs.stat(releaseDir).catch(() => undefined)) throw new Error('Incomplete release preserved. Choose a new version or inspect it manually.'); }
