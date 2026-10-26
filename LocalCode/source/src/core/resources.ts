@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { type WorkspaceContext } from './workspace-context.js';
+import { workspaceBoundary, type WorkspaceContext } from './workspace-context.js';
 import path from 'node:path';
 import type { AttachmentResource } from '../shared/contracts.js';
 import { MAX_FILE_BYTES, normalizeRelative, readWorkspaceText, resolveWorkspacePath } from './workspace.js';
@@ -25,6 +25,7 @@ async function canonicalTarget(input: string, allowMissing: boolean): Promise<st
 }
 /** User-selected attachments are read-only capabilities, never additional writable roots. */
 export async function resolveResource(ctx: ResourceContext, input: string, options: { directory?: boolean; write?: boolean; allowMissing?: boolean } = {}): Promise<ResolvedResource> {
+  if (ctx.projectPath) await workspaceBoundary(ctx);
   const alias = /^attachment:([^/\\]+)(?:[/\\](.*))?$/.exec(input);
   if (alias) {
     const attachment = ctx.attachments?.find(item => item.id === alias[1]);

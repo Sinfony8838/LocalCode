@@ -38,6 +38,17 @@ async function call(f: Awaited<ReturnType<typeof fixture>>, name: string, args: 
 }
 
 describe('application directories are excluded from all workspace capabilities', () => {
+  it('rejects a replaced registered project root through the resource-aware tool boundary', async () => {
+    const f = await fixture(); const original = f.projectPath + '-original';
+    const outside = path.join(f.root, 'foreign'); await fs.mkdir(outside); await fs.writeFile(path.join(outside, 'code.ps1'), 'FOREIGN');
+    const readTool = tools(f).find(tool => tool.name === 'read_file')!;
+    await fs.rename(f.projectPath, original);
+    await fs.symlink(outside, f.projectPath, 'junction');
+    const read = vi.spyOn(fs, 'readFile');
+    await expect(readTool.execute('read', { path: 'code.ps1' }, undefined, undefined, {} as never)).rejects.toThrow('根目录链接已变化');
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it.each(['data', 'cache', 'logs'])('rejects direct %s reads, writes, edits, listings and searches before content I/O', async folder => {
     const f = await fixture();
     const relative = `app-home/${folder}/private.txt`;
