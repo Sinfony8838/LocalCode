@@ -18,8 +18,8 @@ export const DEFAULT_FONT_SIZE = 14;
 export const MIN_FONT_SIZE = 12;
 export const MAX_FONT_SIZE = 20;
 export interface Project { id: string; name: string; path: string; createdAt: string; pinned?: boolean }
-export interface SidebarPreferences { pinnedCollapsed: boolean; projectsCollapsed: boolean; recentCollapsed: boolean; collapsedProjects: string[] }
-export const DEFAULT_SIDEBAR: SidebarPreferences = { pinnedCollapsed: false, projectsCollapsed: false, recentCollapsed: false, collapsedProjects: [] };
+export interface SidebarPreferences { pinnedCollapsed: boolean; projectsCollapsed: boolean; recentCollapsed: boolean; archivedCollapsed: boolean; collapsedProjects: string[] }
+export const DEFAULT_SIDEBAR: SidebarPreferences = { pinnedCollapsed: false, projectsCollapsed: false, recentCollapsed: false, archivedCollapsed: true, collapsedProjects: [] };
 export interface MessagePart { index: number; type: 'text' | 'thinking'; text: string; startedAt: string; endedAt?: string; state: 'streaming' | 'completed' | 'interrupted' }
 export interface RunProgress { phase: 'waiting' | 'thinking' | 'output' | 'tool' | 'queued' | 'retry'; since: string; retryAt?: number; attempt?: number }
 export interface ChatMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; runId?: string; partial?: boolean; parts?: MessagePart[]; attachments?: AttachmentInfo[]; automatic?: boolean }
@@ -27,7 +27,7 @@ export interface RunFileChange { path: string; kind: 'created' | 'modified' | 'd
 export interface RunSummary { runId: string; startedAt: string; endedAt?: string; durationMs?: number; status: 'running' | 'completed' | 'failed' | 'interrupted'; finalMessageId?: string; changes: RunFileChange[]; changeScope: 'workspace_snapshot' | 'file_tools'; coverageNote?: string; changesError?: string }
 export interface ToolRecord { id: string; runId: string; name: string; args: unknown; result?: string; isError?: boolean; status: 'running' | 'completed' | 'failed'; createdAt: string }
 export interface Approval { id: string; runId: string; sessionId: string; command: string; cwd: string; kind?: 'command' | 'read' | 'write'; resource?: string; preview?: string; permissionKey?: string; toolCallId?: string; reason?: string }
-export interface SessionView { id: string; projectId: string | null; title: string; createdAt: string; updatedAt: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress; approvalMode?: ApprovalMode; workMode?: WorkMode; question?: QuestionRecord; plan?: PlanRecord; goal?: GoalState }
+export interface SessionView { id: string; projectId: string | null; title: string; createdAt: string; updatedAt: string; archivedAt?: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress; approvalMode?: ApprovalMode; workMode?: WorkMode; question?: QuestionRecord; plan?: PlanRecord; goal?: GoalState }
 export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean; supportsImages?: boolean }
 export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; supportsImages?: boolean; ollamaMode?: 'managed' | 'existing' }
 export interface ProviderSecret extends ProviderConfig { apiKey: string }
@@ -77,6 +77,8 @@ export interface LocalCodeApi {
  setSidebar(input: Partial<SidebarPreferences>): Promise<SidebarPreferences>;
  openSession(sessionId: string): Promise<SessionView>;
  renameSession(input: {sessionId: string; title: string}): Promise<SessionView>;
+ archiveSession(input: {sessionId: string; archived: boolean}): Promise<SessionView>;
+ deleteSession(sessionId: string): Promise<void>;
  send(input: SendInput): Promise<{runId: string}>;
  stop(sessionId: string): Promise<void>;
  approve(input: {runId: string; approvalId: string; allow: boolean; scope?: 'once' | 'session'}): Promise<void>;

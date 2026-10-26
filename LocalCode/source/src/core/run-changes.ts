@@ -74,6 +74,11 @@ export async function discardRunChanges(dataDir: string, sessionId: string, runI
   try { await fs.unlink(await snapshotPath(dataDir, sessionId, runId)); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 }
+/** Session deletion drops every baseline snapshot at once; per-run validation stays identical. */
+export async function removeSessionChanges(dataDir: string, sessionId: string): Promise<void> {
+  if (!/^[a-zA-Z0-9_-]{1,120}$/.test(sessionId)) throw new Error('无效的会话或任务标识。');
+  await fs.rm(await privateStoragePath(dataDir, `changes/${sessionId}`), { recursive: true, force: true });
+}
 function change(path: string, before: string | null, after: string | null, source: RunFileChange['source'], conflict = false): RunFileChange | undefined {
   if (before === after) return;
   const diff = diffLines(before ?? '', after ?? '', { timeout: 100, maxEditLength: 10000 });

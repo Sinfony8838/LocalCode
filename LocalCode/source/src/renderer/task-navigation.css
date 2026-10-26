@@ -23,6 +23,11 @@
 .sidebar-item-menu { position: fixed; z-index: 1100; width: 205px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
 .sidebar-item-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; text-align: left; border-radius: 7px; font-size: var(--text-label); }
 .sidebar-item-menu button:hover, .sidebar-item-menu button:focus-visible { background: var(--hover); }
+.sidebar-item-menu .danger-menuitem { color: var(--danger); }
+.sidebar-item-menu .danger-menuitem:hover, .sidebar-item-menu .danger-menuitem:focus-visible { background: var(--danger-bg); }
+.sidebar-item-menu button:disabled { opacity: .45; cursor: default; }
+.sidebar-item-menu button:disabled:hover { background: transparent; }
+.archived-session-list .session-button { color: var(--muted); }
 .composer-context { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; padding: 8px 12px; color: var(--muted); font-size: var(--text-label); }
 .workspace-picker-trigger { display: flex; align-items: center; gap: 7px; padding: 3px 0; min-width: 0; max-width: 65%; font-size: inherit; }
 .workspace-picker-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

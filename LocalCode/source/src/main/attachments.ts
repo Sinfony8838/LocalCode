@@ -172,6 +172,30 @@ export class AttachmentStore {
     }
     return resources;
   }
+  /** Delete every record and blob owned by a session: sent attachments (sessionId)
+   * and never-sent drafts captured under the same session draft key. */
+  async removeSession(sessionId: string): Promise<void> {
+    key(sessionId);
+    await this.init();
+    return this.serial(async () => {
+      const entries = await fs.readdir(this.root, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+        const file = path.join(this.root, entry.name);
+        let record: RecordEntry;
+        try {
+          const stat = await fs.lstat(file);
+          if (stat.isSymbolicLink() || stat.size > 16 * 1024) continue;
+          record = JSON.parse(await fs.readFile(file, 'utf8')) as RecordEntry;
+        } catch { continue; /* Unreadable leftovers are not attribution evidence. */ }
+        if (record.sessionId !== sessionId && record.draftKey !== sessionId) continue;
+        let attachmentId: string;
+        try { attachmentId = id(record.id); } catch { continue; }
+        await fs.unlink(file).catch(() => {});
+        await fs.unlink(path.join(this.root, attachmentId + '.blob')).catch(() => {});
+      }
+    });
+  }
   async response(request: Request): Promise<Response> {
     try {
       const url = new URL(request.url);
