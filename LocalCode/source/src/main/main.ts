@@ -198,7 +198,7 @@ async function startRun(arg: SendInput, automatic?: {goalId: string; revision: n
       requestGroup: new URL(provider.baseUrl).origin + ':' + createHash('sha256').update(secret.apiKey).digest('hex'), goalId: goal?.id,
       workMode: mode, automatic: !!automatic, workCalls: 0 };
     runs.set(session.id, active);
-    if (unavailableFolders.length) emit({type:'notice',runId:active.runId,sessionId:session.id,message:`历史文件夹暂不可用，已跳过其读取权限：${[...new Set(unavailableFolders.map(item=>item.name))].join('、')}。需要使用时请重新添加。`});
+    if (unavailableFolders.length) emit({type:'notice',runId:active.runId,sessionId:session.id,message:tr('历史文件夹暂不可用，已跳过其读取权限：{names}。需要使用时请重新添加。',{names:[...new Set(unavailableFolders.map(item=>item.name))].join('、')})});
     if (goal && mode !== 'plan') {
       active.clock = new GoalClock(goal.budgetMs, goal.activeMs, () => { void expireGoal(session.id, goal.id, session.runId!).catch(error => log.write(`Goal expiry: ${error.message}\n`)); });
       active.clock.setActive(true);
@@ -429,7 +429,7 @@ async function invoke(method: string, arg: any) {
       post(active, { type:'approve', ...arg }); return;
     }
     case 'pickAttachments': {
-      const choice = await dialog.showOpenDialog(window!, {title:arg.folders?'添加只读文件夹上下文':'添加图片或文本文件',properties:arg.folders?['openDirectory','multiSelections']:['openFile','multiSelections']});
+      const choice = await dialog.showOpenDialog(window!, {title:tr(arg.folders?'添加只读文件夹上下文':'添加图片或文本文件'),properties:arg.folders?['openDirectory','multiSelections']:['openFile','multiSelections']});
       if (choice.canceled) return []; return attachments.importPaths(arg.draftKey,choice.filePaths,!!arg.folders);
     }
     case 'importAttachments': return attachments.importBytes(arg.draftKey,arg.files);
