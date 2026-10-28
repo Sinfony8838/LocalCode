@@ -421,7 +421,7 @@ export default function App() {
         const original = previous[oldDraftKey] || draft;
         return { ...previous, [targetId]: { ...original, originDraft: original.originDraft || { key: oldDraftKey, signature: draftSignature(original) } } };
       });
-      setError(accepted ? `任务已发送，但暂时未能刷新会话：${errorText(failure)}` : errorText(failure));
+      setError(accepted ? t('任务已发送，但暂时未能刷新会话：{error}', { error: t(errorText(failure)) }) : errorText(failure));
     }
     finally {
       sendLocks.current.delete(oldDraftKey); sendLocks.current.delete(targetId);
@@ -579,7 +579,7 @@ export default function App() {
       </div>
       {!atBottom && <button className="scroll-bottom icon-button" title={t("回到最新消息")} aria-label={t("回到最新消息")} onClick={() => { setAtBottom(true); if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}><ArrowDown size={17} /></button>}
       <div className="composer-area">
-        {notice && <div className="notice-banner"><Sparkles size={14} /><span>{notice}</span><button className="icon-button" aria-label={t("关闭提示")} onClick={() => setNotice('')}><X size={13} /></button></div>}
+        {notice && <div className="notice-banner"><Sparkles size={14} /><span>{t(notice)}</span><button className="icon-button" aria-label={t("关闭提示")} onClick={() => setNotice('')}><X size={13} /></button></div>}
         {activeSession?.goal && <GoalCard goal={activeSession.goal} pending={interactionPending} busy={busy} local={provider?.kind === 'ollama'} planMode={draft.workMode === 'plan'} onControl={(action, budgetMs) => { const session = activeSession; void interaction(session.id, () => window.localcode.controlGoal({ sessionId: session.id, goalId: session.goal!.id, action, budgetMs, ...(action === 'resume' && provider ? { providerId: provider.id, modelId: provider.model } : {}) })); }} />}
         {activeSession?.approval && <ApprovalCard approval={activeSession.approval} pending={approvalPending} onAnswer={(allow, scope) => void approve(allow, scope)} />}
         {activeSession?.question && <QuestionCard key={activeSession.question.id} question={activeSession.question} pending={interactionPending} onAnswer={answers => { const session = activeSession, question = session.question!; void interaction(session.id, () => window.localcode.answerQuestion({ sessionId: session.id, runId: question.runId, questionId: question.id, answers })); }} onStop={() => void stop()} />}
