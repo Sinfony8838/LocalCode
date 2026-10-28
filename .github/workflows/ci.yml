@@ -37,8 +37,8 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: .\scripts\Test-Setup.ps1
-      - name: Test portable allowlist and restricted-policy acceptance launcher
-        run: node --test scripts/tests/portable-bundle.test.mjs scripts/tests/acceptance-launcher.test.mjs
+      - name: Test portable allowlist, restricted-policy acceptance launcher and benchmark harness
+        run: node --test scripts/tests/portable-bundle.test.mjs scripts/tests/acceptance-launcher.test.mjs scripts/tests/five-task-benchmark.test.mjs
       - run: npm ci
         working-directory: LocalCode/source
       - run: npm run typecheck

@@ -1,0 +1,1 @@
+- See report.json for the computed statistics (reference solution used by the harness self-test).

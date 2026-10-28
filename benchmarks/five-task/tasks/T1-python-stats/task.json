@@ -1,0 +1,11 @@
+{
+  "id": "T1-python-stats",
+  "title": "Fix a Python module with failing unit tests",
+  "language": "Python",
+  "requires": ["python"],
+  "protected": ["test_stats.py"],
+  "prompt": {
+    "zh": "这个文件夹里的 stats.py 有若干 bug，导致 test_stats.py 中的测试失败。请修复 stats.py，使全部测试通过；不要修改 test_stats.py。修改后请运行 `python -m unittest -v` 确认结果，并简要说明你修复了什么。",
+    "en": "stats.py in this folder has several bugs that make the tests in test_stats.py fail. Fix stats.py so every test passes; do not modify test_stats.py. Run `python -m unittest -v` afterwards to confirm, and briefly explain what you fixed."
+  }
+}

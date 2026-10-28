@@ -1,0 +1,30 @@
+{
+  "totalBuilds": 160,
+  "failedBuilds": 26,
+  "failureRate": 0.1733,
+  "medianDurationSeconds": 540.5,
+  "slowestBuildId": "b1032",
+  "byBranch": {
+    "release/0.2": {
+      "builds": 23,
+      "failed": 7
+    },
+    "main": {
+      "builds": 70,
+      "failed": 10
+    },
+    "feat/pets": {
+      "builds": 18,
+      "failed": 3
+    },
+    "fix/command-stdin": {
+      "builds": 23,
+      "failed": 2
+    },
+    "feat/i18n": {
+      "builds": 26,
+      "failed": 4
+    }
+  },
+  "topFailingTest": "command.test.ts"
+}
