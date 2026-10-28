@@ -2,7 +2,7 @@
 
 # LocalCode
 
-Version 0.2.0 adds three approval modes, image/text/read-only-folder attachments, interactive planning, and persistent goals for external models. Goals default to two hours of active work with pause/resume and editable budgets; local Ollama goals are disabled. External models no longer have a fixed twelve-tool limit. The neutral light/dark UI preserves the four interface languages, model setup, and checkpoints. See the [usage guide](LocalCode/source/docs/AGENT_MODES.md) and [implementation provenance](LocalCode/source/THIRD_PARTY_NOTICES.md). Version 0.2.1 also integrates application-data isolation for file tools, previews, undo and checkpoints.
+**What's new:** 0.2.3 fixes a command-executor deadlock in which Python commands completed their work but then hung until the 120-second command timeout (see the [incident review](LocalCode/source/docs/incident-2026-10-28-python-command-deadlock.md)). 0.2.2 adds archiving, restoring and deleting conversations from the sidebar. 0.2.1 integrated application-data isolation for file tools, previews, undo and checkpoints. 0.2.0 added three approval modes, image/text/read-only-folder attachments, interactive planning, and persistent goals for external models. The full history is in the [changelog](CHANGELOG.md); see also the [usage guide](LocalCode/source/docs/AGENT_MODES.md) and [implementation provenance](LocalCode/source/THIRD_PARTY_NOTICES.md).
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -12,17 +12,29 @@ This repository contains the application architecture, source, tests, dependency
 
 Settings → Desktop companion now includes a preview and custom pet library. The bundled `create-desktop-pet` skill lets a project task use the selected chat model to coordinate creation, call a separate image API, validate and preview an atlas, then import it as a companion. Public builds do not include third-party character art. See [custom desktop pets](docs/CUSTOM_PETS.md).
 
-Tasks can start without a project folder. Choose a workspace above the composer when needed, or move an existing projectless task into a project while keeping its conversation. Projects support pinning and collapsible task groups; sidebar preferences persist. File names open inline, and copy is available once per final answer. See [tasks and projects](docs/TASKS_AND_PROJECTS.md).
+Tasks can start without a project folder. Choose a workspace above the composer when needed, or move an existing projectless task into a project while keeping its conversation. Projects support pinning and collapsible task groups; sidebar preferences persist. From a task's menu you can **archive** it (it moves to a collapsible **Archived** section and can be restored; an active goal is paused) or **delete** it after confirmation, which also removes its change snapshots, agent transcript and attachment copies. Both actions are disabled while the task is running. File names open inline, and copy is available once per final answer. See [tasks and projects](docs/TASKS_AND_PROJECTS.md).
 
 Conversation text uses the system sans-serif font, with a 14 px default size, 24 px line height, and 12 px paragraph spacing. Font size remains adjustable in Settings → Appearance. Stop status and elapsed time share one line; completed runs show elapsed time before the final reply. File cards show three files initially and expand to reveal the rest. Routine coverage notes are hidden, while actual statistics errors remain visible.
 
-> **Windows download:** [LocalCode 0.2.1 — Windows x64 portable ZIP](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.1). Verify `SHA256SUMS.txt`, extract the complete folder, then run `Start.cmd`. Existing installations should be backed up and updates extracted into a new folder; see below.
+> **Windows download:** [LocalCode 0.2.3 — Windows x64 portable ZIP](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.3). Verify `SHA256SUMS.txt`, extract the complete folder, then run `Start.cmd`. Existing installations should be backed up and updates extracted into a new folder; see below.
 
 ## Interface and reply language
 
 Open **Settings → Language** (initially **设置 → 语言**) to choose **简体中文 / English / 日本語 / 한국어**. The interface updates immediately and the choice is saved across restarts. Existing conversations use the new default reply language from their next turn; an active turn keeps its starting language. Explicit reply or translation language requests take priority: a Chinese question asking for an English answer should receive English. User messages, model responses, code, file paths, and tool output are preserved in their original language.
 
 The language policy is verified through request capture with a local mock model; live model compliance has not been evaluated in this change.
+
+## Approval modes and tool limits
+
+The approval selector below the composer offers three modes:
+
+- **Ask for approval** — routine file tools inside the selected project run directly; terminal commands and paths outside the project ask first.
+- **Approve with rules** — actions that match rules you already approved in this conversation run; everything else asks. A fully parsable PowerShell command is not auto-approved unless it matches such a rule.
+- **Full access** — skips routine approval prompts and runs with your current Windows user permissions (never elevated).
+
+An approval card can allow once, allow the same scope for this conversation, or deny. Command approvals are bound to the exact command and working directory; they do not carry over to other conversations or survive a restart. Plan mode stays read-only even under Full access. Projectless tasks have no file-writing or terminal tools. None of these modes is an OS sandbox.
+
+Local Ollama turns are limited to **12 tool calls per turn**; when the budget is used up the model gives one final tool-free summary. External (API) models have no fixed per-turn tool limit. Goal mode is available for external models only. See the [usage guide](LocalCode/source/docs/AGENT_MODES.md).
 
 ## Quick start: choose the download that fits you
 
@@ -31,7 +43,7 @@ Use **Windows 11 x64** (Windows 10 22H2 x64 is an upstream-compatible target, un
 | What you downloaded | How to recognize it | First step |
 | --- | --- | --- |
 | **Source ZIP** from GitHub **Code → Download ZIP** (or an automatically generated “Source code” archive) | Contains `LocalCode/source/package.json`; no packaged desktop | Run `Setup.cmd`; choose **2 — Desktop only** for a cloud API or an existing Ollama service |
-| **Portable desktop** from a successful Actions run | The inner app ZIP contains `READ-ME-FIRST.txt` and `LocalCode/app/current.txt` | Extract both ZIP layers, then run `Start.cmd` |
+| **Windows x64 portable ZIP** from a GitHub Release | `LocalCode-0.2.3-windows-x64.zip` contains `READ-ME-FIRST.txt` and `LocalCode/app/current.txt` | Extract the complete folder, then run `Start.cmd`; an Actions artifact has an extra outer ZIP layer |
 
 If no successful, unexpired artifact is listed, there is no portable download for that run. Renaming a source ZIP or copying a launcher will not make it runnable.
 
@@ -49,14 +61,14 @@ Opening LocalCode does not install your project's language runtimes or build too
 
 ### Prebuilt portable desktop: extract and open
 
-Download **`LocalCode-0.2.1-windows-x64.zip`** and **`SHA256SUMS.txt`** from the [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.1). No GitHub sign-in is needed for public release assets. Check the ZIP with `Get-FileHash -Algorithm SHA256`, extract the complete application folder and run `Start.cmd`. The Source code ZIP requires building and is a different download. Actions artifacts remain temporary validation builds; they require sign-in and contain an inner application ZIP.
+Download **`LocalCode-0.2.3-windows-x64.zip`** and **`SHA256SUMS.txt`** from the [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.3). No GitHub sign-in is needed for public release assets. Check the ZIP with `Get-FileHash -Algorithm SHA256`, extract the complete application folder and run `Start.cmd`. The Source code ZIP requires building and is a different download. Actions artifacts remain temporary validation builds; they require sign-in and contain an inner application ZIP.
 
 1. Double-click the extracted **`Start.cmd`**. No build tools or model downloads are needed to open the desktop.
 2. Choose your connection in Settings:
    - **Already have Ollama?** Explicitly select the existing local service and choose one of its installed models. LocalCode will not install, replace or stop it.
    - **Use your own API?** Configure that provider. Saving configuration does not make a model request; an explicit connection test or task may use quota.
    - **Want LocalCode's managed local model?** Close LocalCode, then double-click **`Install-LocalModel.cmd`**. This downloads checksum-pinned Ollama 0.40.10 and `qwen3.5:9b-q4_K_M`, with the `localcode-agent` alias at 8192-token context. It does **not** download Node.js or rebuild the desktop. Allow several GB of downloads and preferably **25 GiB free**; check the hardware guidance below before choosing the 9B model.
-3. Start a conversation directly, or select a project folder for a coding task. Projectless conversations have no file or terminal tools; project terminal commands require explicit approval.
+3. Start a conversation directly, or select a project folder for a coding task. Projectless conversations have no file or terminal tools; whether project terminal commands ask first depends on the approval mode above (the default asks).
 
 Opening the desktop never silently starts or reuses an Ollama service. For a managed installation after reboot, use the explicit local-service start action in Settings (or `Ollama\Start.cmd`). Closing LocalCode leaves an already running managed Ollama available; idle models unload after five minutes. `Ollama\Stop.cmd` stops only the managed process whose executable path matches this installation.
 
@@ -95,9 +107,9 @@ Preview any mode **without downloads, service starts or filesystem writes**:
 
 ### First cloud API connection (no local model needed)
 
-Use the endpoint, API format, model ID and API key supplied by your provider; LocalCode does not create an account or supply API credit. The desktop UI is Chinese:
+Use the endpoint, API format, model ID and API key supplied by your provider; LocalCode does not create an account or supply API credit. Labels below are given in English with the Simplified Chinese interface text in parentheses; the interface is also available in Japanese and Korean (Settings → Language).
 
-1. Open **设置 → 模型设置 → 自定义 API** (Settings → Model Settings → Custom API). Use **火山 Coding Plan** only when that is your provider/plan.
+1. Open **Settings → Model Settings → Custom API** (设置 → 模型设置 → 自定义 API). Use the **火山 Coding Plan** (Volcengine Ark Coding Plan) preset only when that is your provider/plan.
 2. Enter **供应商名称**, **Base URL**, **API 格式**, **API Key** and **模型 ID**. Use the provider's API endpoint, not its website or chat page. Do not paste a full `/chat/completions`, `/responses` or `/messages` request URL. The connection test appends `/chat/completions` or `/responses` for the corresponding OpenAI formats, and `/v1/messages` for Anthropic, so do not duplicate those path segments.
 3. Set context/output limits to values supported by your model; output limit **plus 1536 must be less than** the context window. Keep the provider and model enabled, then click **保存配置**. Saving does not send a model request.
 4. Optionally click the model's **plug icon** to test the saved connection. This sends a small request and may consume quota. A green configuration dot alone does not prove connectivity; a successful connection test does not prove tool-calling support.
@@ -179,8 +191,8 @@ flowchart LR
 
 - Renderer: isolated, sandboxed Electron window without Node.js access.
 - Main process: validates IPC, encrypts provider credentials with Windows-backed Electron `safeStorage`, persists sessions, coordinates approvals and cancellation, and schedules requests.
-- Agent workers: pinned pi SDK 1.4.0; bounded tool loops; independent cancellation and approvals per conversation.
-- Workspace: UTF-8 text tools with path/link checks, snapshots, conflict-aware undo, and visible diffs. File tools can edit without a second approval; every terminal command requires approval.
+- Agent workers: pinned pi SDK 1.4.0, one Electron utility process per active conversation; local Ollama turns are capped at 12 tool calls, external models have no fixed cap; independent cancellation and approvals per conversation.
+- Workspace: UTF-8 text tools with path/link checks, snapshots, conflict-aware undo, and visible diffs. Routine file edits inside the project need no extra approval; terminal commands follow the selected approval mode (Ask for approval / Approve with rules / Full access). Approved PowerShell runs in a Windows Job object and is terminated if its agent worker exits, with stdin closed so child runtimes such as Python exit cleanly.
 - Models: local Ollama by default; optional API configuration in Settings. Saving API configuration does not call a provider. Explicit connection tests and tasks may consume quota.
 - Optional companion: import your own licensed sprite atlas (1536 × 2288 RGBA PNG, 8 × 11 grid). No character artwork is distributed; companions start disabled.
 

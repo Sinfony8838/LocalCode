@@ -8,21 +8,33 @@
 
 本仓库公开完整应用架构、源码、测试、依赖锁及一键部署脚本。
 
-0.2.0 新增三档审批、图片／文本／只读文件夹附件、问题卡与计划卡，以及外部模型的目标持续执行。目标默认累计有效工作 2 小时，支持暂停、恢复和预算调整；本地模型不支持目标模式。所有外部模型任务取消每轮固定 12 次工具限制，本地保留。界面改为白灰／深灰，并保留四语言、首次模型配置与 checkpoint。详见[使用说明](LocalCode/source/docs/AGENT_MODES.md)和[开源实现来源](LocalCode/source/THIRD_PARTY_NOTICES.md)。0.2.1 另整合了文件工具、预览、撤销及 checkpoint 的应用数据隔离修复。
+**更新内容：** 0.2.3 修复命令执行器死锁：Python 命令实际已执行完毕，却一直挂起到 120 秒命令超时（详见[事件复盘](LocalCode/source/docs/incident-2026-10-28-python-command-deadlock.md)）。0.2.2 新增在侧栏归档、恢复和删除会话。0.2.1 整合了文件工具、预览、撤销及 checkpoint 的应用数据隔离修复。0.2.0 新增三档审批、图片／文本／只读文件夹附件、问题卡与计划卡，以及外部模型的目标持续执行。完整历史见[更新日志](CHANGELOG.md)；另见[使用说明](LocalCode/source/docs/AGENT_MODES.md)和[开源实现来源](LocalCode/source/THIRD_PARTY_NOTICES.md)。
 
 “设置 → 桌宠”提供预览与自定义宠物库。通过专用 `create-desktop-pet` Skill，可在项目中使用所选聊天模型组织制作流程，并调用独立图片 API 生成、校验和预览图集，再导入为自己的桌宠。公开构建不附带第三方角色素材。详见[自定义桌宠](docs/CUSTOM_PETS.md#中文使用说明)。
 
-任务可直接开始，无需先指定项目文件夹；需要时在输入框上方选择项目，或将已有非项目任务移入项目并保留上下文。项目支持置顶和任务列表折叠，侧栏偏好重启后保留。文件名直接融入正文，每轮最终总结后保留一个复制按钮。详见[任务与项目](docs/TASKS_AND_PROJECTS.md#中文使用说明)。
+任务可直接开始，无需先指定项目文件夹；需要时在输入框上方选择项目，或将已有非项目任务移入项目并保留上下文。项目支持置顶和任务列表折叠，侧栏偏好重启后保留。任务菜单可**归档**任务（移入可折叠的“已归档”分组并可恢复；进行中的目标会暂停），或在确认后**删除**任务，同时清除其修改快照、Agent 对话记录和附件副本。任务运行期间这两项操作不可用。文件名直接融入正文，每轮最终总结后保留一个复制按钮。详见[任务与项目](docs/TASKS_AND_PROJECTS.md#中文使用说明)。
 
 聊天排版采用系统无衬线字体，默认正文 14 px、行高 24 px、段间距 12 px；可在“设置 → 外观”调整字号。停止状态和用时合并为一行，成功运行的用时显示在最终回复前；文件卡片先显示三个文件，其余可展开。固定统计范围说明不再占用聊天空间，实际统计异常仍会显示。
 
-> **Windows 下载：** [LocalCode 0.2.1 — Windows x64 便携包](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.1)。校验 `SHA256SUMS.txt` 后完整解压，双击 `Start.cmd`。更新前备份旧目录，并将新版解压到新目录，详见下文。
+> **Windows 下载：** [LocalCode 0.2.3 — Windows x64 便携包](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.3)。校验 `SHA256SUMS.txt` 后完整解压，双击 `Start.cmd`。更新前备份旧目录，并将新版解压到新目录，详见下文。
 
 ## 界面与回复语言
 
 在 **设置 → 语言** 选择 **简体中文 / English / 日本語 / 한국어**。界面立即切换，设置自动保存并在重启后保留。已有会话从下一轮开始使用新的默认回复语言，正在进行的轮次保留启动时的语言。用户明确指定的回复或翻译语言优先：例如用中文提问但要求英文回答时，应使用英文。用户消息、模型历史回答、代码、文件路径和工具原始输出保留原文。
 
 本次通过本机模拟模型接口捕获请求验证语言规则，尚未评估真实模型的语言遵循效果。
+
+## 审批模式与工具次数上限
+
+输入框下方的审批选择器提供三档：
+
+- **请求批准**（默认）：项目内常规文件工具直接运行，终端命令和项目外路径先请求批准。
+- **帮我批准**：与本会话已批准规则匹配的操作直接执行，其他操作询问。即使 PowerShell 能完整解析，未匹配规则的命令也不会自动执行。
+- **完全访问权限**：跳过常规审批，以当前 Windows 用户权限运行（不提权）。
+
+审批卡可选择允许本次、本会话允许相同范围或拒绝。命令授权绑定完整命令和工作目录，不跨会话，重启后失效。计划模式即使在完全访问权限下也保持只读。非项目任务没有写文件或终端工具。以上模式都不是操作系统沙箱。
+
+本地 Ollama 每轮最多 **12 次工具调用**，用尽后模型只能再给出一次不调用工具的总结；外部（API）模型没有固定的每轮工具次数上限。目标模式仅支持外部模型。详见[使用说明](LocalCode/source/docs/AGENT_MODES.md)。
 
 ## 快速开始：先选适合的下载方式
 
@@ -31,7 +43,7 @@
 | 下载的是什么 | 怎么辨认 | 第一步 |
 | --- | --- | --- |
 | GitHub **Code → Download ZIP** 或自动生成的 **Source code** 源码压缩包 | 有 `LocalCode/source/package.json`，没有已打包桌面 | 运行 `Setup.cmd`；使用云端 API 或已有 Ollama 时选 **2 — 仅桌面** |
-| GitHub Release 的 **Windows x64 便携包** | `LocalCode-0.2.1-windows-x64.zip` 内有 `READ-ME-FIRST.txt` 和 `LocalCode/app/current.txt` | 完整解压，再运行 `Start.cmd`；Actions 产物需额外解压外层 ZIP |
+| GitHub Release 的 **Windows x64 便携包** | `LocalCode-0.2.3-windows-x64.zip` 内有 `READ-ME-FIRST.txt` 和 `LocalCode/app/current.txt` | 完整解压，再运行 `Start.cmd`；Actions 产物需额外解压外层 ZIP |
 
 如果该次工作流没有成功且未过期的产物，就没有对应的便携下载。修改源码 ZIP 的名字或只复制启动器，不能让源码变成可运行程序。
 
@@ -49,14 +61,14 @@
 
 ### 便携桌面版：解压即开
 
-在 [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.1) 下载 **`LocalCode-0.2.1-windows-x64.zip`** 与 **`SHA256SUMS.txt`**，公开发行附件无需登录 GitHub。用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 的校验值，完整解压应用目录后双击 `Start.cmd`。自动生成的 Source code ZIP 是源码，需要构建；Actions 仍是临时验证产物，下载需登录，且需再解压内层应用 ZIP。
+在 [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.3) 下载 **`LocalCode-0.2.3-windows-x64.zip`** 与 **`SHA256SUMS.txt`**，公开发行附件无需登录 GitHub。用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 的校验值，完整解压应用目录后双击 `Start.cmd`。自动生成的 Source code ZIP 是源码，需要构建；Actions 仍是临时验证产物，下载需登录，且需再解压内层应用 ZIP。
 
 1. 双击解压后的 **`Start.cmd`** 即可打开桌面，不需要编译工具，也不会自动下载模型。
 2. 在设置中选择连接方式：
    - **已经安装 Ollama？** 明确选择连接已有本地服务，并选一个它已经安装的模型。LocalCode 不会替换、安装或停止这个服务。
    - **使用自己的 API？** 配置提供方。保存配置不会发起模型请求；手动测试连接或发送任务可能消耗额度。
    - **需要 LocalCode 自带管理的本地模型？** 关闭桌面后，双击 **`Install-LocalModel.cmd`**，下载并校验固定版本 Ollama 0.40.10 与 `qwen3.5:9b-q4_K_M`，创建 8192 tokens 上下文的 `localcode-agent`。这一步**不下载 Node.js，也不重新构建桌面**。预计下载数 GB，建议预留 **25 GiB**；选择默认 9B 模型前，请先看下方硬件建议。
-3. 可直接开始对话，需要读写代码时再选择项目文件夹。非项目对话不提供文件或终端工具；项目中的终端命令需逐条确认。
+3. 可直接开始对话，需要读写代码时再选择项目文件夹。非项目对话不提供文件或终端工具；项目中的终端命令是否先询问取决于上方的审批模式（默认会询问）。
 
 打开桌面不会悄悄启动或复用 Ollama。重启电脑后，如需本套托管服务，请在设置中明确点击启动，或运行 `Ollama\Start.cmd`。关闭桌面不会关闭已经运行的本套 Ollama，空闲五分钟卸载模型；`Ollama\Stop.cmd` 仅停止路径匹配的本套服务。
 
@@ -95,7 +107,7 @@
 
 ### 第一次配置云端 API（不需要本地模型）
 
-请准备提供方给出的 API 地址、API 格式、模型 ID 和 API Key。LocalCode 不会代为开户，也不附送 API 额度。
+请准备提供方给出的 API 地址、API 格式、模型 ID 和 API Key。LocalCode 不会代为开户，也不附送 API 额度。以下按简体中文界面描述；界面也可在“设置 → 语言”切换为英文、日文或韩文。
 
 1. 打开 **设置 → 模型设置 → 自定义 API**。只有使用对应服务/套餐时，才选择 **火山 Coding Plan** 预设。
 2. 填写 **供应商名称、Base URL、API 格式、API Key、模型 ID**。Base URL 是 API 地址，不是官网或聊天页面；不要粘贴完整的 `/chat/completions`、`/responses` 或 `/messages` 请求地址。连接测试会按 OpenAI 格式追加 `/chat/completions` 或 `/responses`，按 Anthropic 格式追加 `/v1/messages`，不要重复这些路径。
@@ -166,9 +178,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Model qwen3.5:2
 
 ## 架构与开发
 
-React 渲染端通过验证后的 IPC 连接 Electron 主进程；主进程管理会话、Windows 加密凭证、请求排队和审批；每个活跃会话拥有独立 Agent worker，使用固定 pi SDK 1.4.0，调用受范围约束的文件工具、需审批的 PowerShell 和本地 Ollama / 自选 API。
+```mermaid
+flowchart LR
+  UI[React 渲染端] -->|验证后的 IPC| Main[Electron 主进程]
+  Main --> Store[本地索引与加密凭证]
+  Main --> Scheduler[模型请求队列]
+  Main --> Worker[每个活跃会话一个 Agent worker]
+  Worker --> Tools[受范围约束的文件工具与审批后的 PowerShell]
+  Worker --> Ollama[Ollama 127.0.0.1:11434]
+  Worker --> Cloud[可选自配 API]
+```
 
-文件工具提供 UTF-8 文本处理、路径及链接检查、修改快照、冲突检测撤销和差异预览。文件工具可以直接编辑项目；终端命令需审批。不同会话共用项目磁盘文件，并发写同一文件不会自动合并。
+- 渲染端：隔离、沙箱化的 Electron 窗口，无 Node.js 访问权限。
+- 主进程：验证 IPC，用 Windows 支持的 Electron `safeStorage` 加密提供方凭证，持久化会话，协调审批与取消，调度请求。
+- Agent worker：固定 pi SDK 1.4.0，每个活跃会话一个 Electron utility 进程；本地 Ollama 每轮最多 12 次工具调用，外部模型无固定上限；各会话独立取消与审批。
+- 工作区：UTF-8 文本工具，带路径及链接检查、修改快照、冲突检测撤销和差异预览。项目内常规文件编辑无需额外审批；终端命令遵循所选审批模式（请求批准／帮我批准／完全访问权限）。审批后的 PowerShell 运行在 Windows Job 对象中，Agent worker 退出时会被终止；其 stdin 已关闭，Python 等子运行时可正常退出。不同会话共用项目磁盘文件，并发写同一文件不会自动合并。
+- 模型：默认本地 Ollama，可在设置中配置 API。保存 API 配置不会调用提供方；手动连接测试和任务可能消耗额度。
 
 ```powershell
 cd LocalCode\source
@@ -183,7 +208,15 @@ cd ..\..
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Setup.ps1
 ```
 
-手动开发使用 Node.js 24 x64；源码安装脚本会自动下载它。锁文件固定精确依赖。打包生成独立版本目录，拒绝覆盖不同构建。直接 `npm start` 默认使用 Electron 用户数据目录；根启动器使用项目内的便携数据目录。目录布局与完整架构图见[英文说明](README.md#architecture)。
+手动开发使用 Node.js 24 x64；源码安装脚本会自动下载它。锁文件固定精确依赖。打包仅面向 Windows x64，生成独立版本目录，拒绝覆盖不同构建。直接 `npm start` 默认使用 Electron 用户数据目录（设置 `LOCALCODE_HOME` 时除外）；根启动器使用项目内的便携数据目录。
+
+| 位置 | 用途 | 是否发布 |
+| --- | --- | --- |
+| `LocalCode/source/src`、`tests`、`scripts` | 实现、测试、构建及模拟验收 | 是 |
+| `Setup.ps1`、`Ollama/*.ps1`、启动器 | 便携部署辅助脚本 | 是 |
+| `LocalCode/data`、`cache`、`logs`、`evidence`、`app` | 凭证、会话、快照、缓存、测试输出、可执行文件 | 否 |
+| `Ollama/models`、`runtime`、`profile`、`logs`、`downloads`、`temp` | 权重、二进制、私有配置、运行数据 | 否 |
+| `tools`、`downloads` | 便携 Node.js 与下载的压缩包 | 否 |
 
 桌宠默认关闭，不发布角色美术素材。可自行导入具有合法使用权的 1536×2288 RGBA PNG 图集（8 列×11 行）；两个人物槽位使用中性名称。
 

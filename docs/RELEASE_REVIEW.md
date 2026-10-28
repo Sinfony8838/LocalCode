@@ -1,5 +1,33 @@
 # Open-source release review
 
+## 0.2.3 command-executor deadlock fix
+
+Prepared on 2026-10-29 (Asia/Shanghai). Source commits `9160167` (fix) and `c4a592a` (incident record and version bump), plus a documentation-only commit updating the READMEs, this review and `CHANGELOG.md`. 0.2.3 is the first GitHub Release after 0.2.1 and also ships the 0.2.2 changes below.
+
+The approved-command executor's parent-death watchdog previously blocked on a stdin pipe read. CPython closes inherited standard handles during interpreter shutdown, which deadlocked against that read, so every Python command finished its work and then hung until the 120-second timeout. The watchdog now waits on the agent worker's process handle and the command's stdin is `NUL`. See the [incident review](../LocalCode/source/docs/incident-2026-10-28-python-command-deadlock.md).
+
+| Check | Result |
+| --- | --- |
+| Hosted Windows CI on `c4a592a` (typecheck, unit/integration, source and packaged Electron suites, setup checks, scans, packaging) | PASS — [run 40710293331](https://github.com/Sinfony8838/LocalCode/actions/runs/40710293331) |
+| Maintainer local unit/integration run reported in the incident review | PASS; 310 tests in 29 files, including the new Python regression test |
+| Independent Linux re-run of typecheck and unit tests on `c4a592a` | PASS; 301 passed, 11 Windows-only skipped |
+| Release archive | Built by hosted CI for the final documentation commit; exact commit, run and checksum are recorded in the release's `release-manifest.json` |
+| Real Ollama/GPU inference and real cloud requests for these bytes | UNRUN; automated checks use synthetic localhost providers |
+| Clean-Windows, fresh default Ollama and computer-reboot acceptance | UNRUN |
+| Regression coverage for other third-party runtimes (Node.js, Git, long output, interactive stdin) through the executor | NOT YET ADDED |
+
+## 0.2.2 session archive and delete
+
+Merged on 2026-10-26 and versioned on 2026-10-28 (Asia/Shanghai) as `8ff8cf0` / `79f4eb3`. Adds archive, restore and delete for tasks from the sidebar; deletion clears the task's snapshots, transcripts and attachment blobs under validated private-storage roots and is refused while a run is in flight. `.gitignore` now excludes the private desktop-pet atlas directory.
+
+| Check | Result |
+| --- | --- |
+| Hosted Windows CI on `8ff8cf0` and `79f4eb3` | PASS — [run 40341584992](https://github.com/Sinfony8838/LocalCode/actions/runs/40341584992), [run 40686877974](https://github.com/Sinfony8838/LocalCode/actions/runs/40686877974) |
+| Store, attachment and sidebar archive unit tests | Added and passing in CI |
+| Dedicated Electron acceptance suite for archive/delete | NOT ADDED; covered by unit/component tests only |
+| GitHub Release | Not published separately; shipped in 0.2.3 |
+| Real-model, clean-Windows and reboot acceptance | UNRUN |
+
 ## 0.2.1 Windows portable release
 
 Release preparation on 2026-10-26 (Asia/Shanghai), following the maintainer's report that their friend completed testing and their explicit instruction to publish. That external result is recorded as user-reported; no exact tested ZIP hash, hardware report or detailed local/cloud/reboot results were supplied for the new integrated package.
