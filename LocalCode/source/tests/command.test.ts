@@ -144,3 +144,81 @@ win('Windows command lifecycle', () => {
     }
   }, 60_000);
 });
+
+// Runtime regressions: real language runtimes and tools run through the
+// approved-command executor exactly as an agent would invoke them. stdin is
+// closed (NUL), so anything that reads it must see end-of-file at once instead
+// of waiting for input that can never arrive.
+win('Windows command runtimes', () => {
+  const node = process.execPath.replace(/'/g, "''");
+  async function script(f: { projectPath: string }, name: string, source: string) { await fs.writeFile(path.join(f.projectPath, name), source, 'utf8'); return `& '${node}' '${name}'`; }
+  const usable = (command: string, args: string[]) => { const probe = spawnSync(command, args, { windowsHide: true, timeout: 15_000 }); return !probe.error && probe.status === 0; };
+
+  it('runs Node.js scripts with UTF-8 output on stdout and stderr and propagates their exit code', async () => {
+    const f = await fixture();
+    const command = await script(f, 'hello.mjs', "process.stdout.write('节点中文输出 ✓\\n'); process.stderr.write('标准错误输出\\n'); process.exitCode = 5;\n");
+    const started = Date.now(); const result = await executePowerShell({ ...f, command, timeoutMs: 30_000 });
+    expect(result.timedOut).toBe(false); expect(result.exitCode).toBe(5); expect(Date.now() - started).toBeLessThan(25_000);
+    expect(result.output).toContain('节点中文输出 ✓'); expect(result.output).toContain('标准错误输出');
+    const log = await fs.readFile(result.logPath, 'utf8'); expect(log).toContain('节点中文输出 ✓'); expect(log).toContain('标准错误输出');
+  }, 40_000);
+
+  it('gives Node.js an immediately closed stdin instead of an interactive wait', async () => {
+    const f = await fixture();
+    const command = await script(f, 'stdin.mjs', "let bytes = 0; process.stdin.on('data', chunk => { bytes += chunk.length; }); process.stdin.on('end', () => { console.log(`stdin-eof bytes=${bytes}`); });\nsetTimeout(() => { console.log('stdin-still-open'); process.exit(9); }, 15000).unref();\n");
+    const started = Date.now(); const result = await executePowerShell({ ...f, command, timeoutMs: 30_000 });
+    expect(result.timedOut).toBe(false); expect(result.exitCode).toBe(0); expect(result.output).toContain('stdin-eof bytes=0');
+    expect(result.output).not.toContain('stdin-still-open'); expect(Date.now() - started).toBeLessThan(14_000);
+  }, 40_000);
+
+  it('lets Python read stdin to end-of-file and fail fast on input() instead of hanging', async () => {
+    if (!usable('python', ['-c', 'print(1)'])) return; // No usable Python here (e.g. Store stub).
+    const f = await fixture();
+    const read = await executePowerShell({ ...f, command: `python -c "import sys; print('py-stdin', len(sys.stdin.read()))"`, timeoutMs: 30_000 });
+    expect(read.timedOut).toBe(false); expect(read.exitCode).toBe(0); expect(read.output).toContain('py-stdin 0');
+    const started = Date.now(); const prompt = await executePowerShell({ ...f, command: `python -c "input('name? ')"`, timeoutMs: 30_000 });
+    expect(prompt.timedOut).toBe(false); expect(prompt.exitCode).toBe(1); expect(prompt.output).toContain('EOFError'); expect(Date.now() - started).toBeLessThan(25_000);
+  }, 70_000);
+
+  it('rejects PowerShell interactive prompts immediately under -NonInteractive', async () => {
+    const f = await fixture(); const started = Date.now();
+    const result = await executePowerShell({ ...f, command: "$name = Read-Host 'Name'; [Console]::WriteLine('prompt-answered')", timeoutMs: 30_000 });
+    expect(result.timedOut).toBe(false); expect(result.exitCode).toBe(1); expect(result.output).not.toContain('prompt-answered');
+    expect(result.output.toLowerCase()).toContain('noninteractive'); expect(Date.now() - started).toBeLessThan(25_000);
+  }, 40_000);
+
+  it('runs a git init / commit / log workflow and propagates git failures', async () => {
+    if (!usable('git', ['--version'])) return; // Git is not installed on this machine.
+    const f = await fixture();
+    const identity = "-c user.name=LocalCode -c user.email=localcode@example.invalid -c commit.gpgsign=false";
+    const ok = await executePowerShell({ ...f, timeoutMs: 60_000, command: `git -c init.defaultBranch=main init -q; Set-Content -LiteralPath 'note.md' -Value '提交内容'; git add note.md; git ${identity} commit -q -m '首次提交 first commit'; git log --format='log:%s'; git status --porcelain=v1 --branch` });
+    expect(ok.timedOut).toBe(false); expect(ok.exitCode).toBe(0);
+    expect(ok.output).toContain('log:首次提交 first commit'); expect(ok.output).toContain('## main');
+    const failed = await executePowerShell({ ...f, timeoutMs: 30_000, command: 'git rev-parse --verify --quiet refs/heads/does-not-exist' });
+    expect(failed.timedOut).toBe(false); expect(failed.exitCode).toBe(1);
+    const missing = await executePowerShell({ ...f, timeoutMs: 30_000, command: "git -C 'missing-directory' status" });
+    expect(missing.timedOut).toBe(false); expect(missing.exitCode).toBe(128);
+  }, 90_000);
+
+  it('keeps interleaved long stdout/stderr output complete in the log and the exit code intact', async () => {
+    const f = await fixture();
+    const command = await script(f, 'mixed.mjs', "for (let i = 0; i < 20000; i++) (i % 2 ? process.stderr : process.stdout).write(`${i % 2 ? 'err' : 'out'} line ${i}\\n`);\nprocess.stdout.write('MIX-END\\n', () => process.exit(3));\n");
+    const result = await executePowerShell({ ...f, command, timeoutMs: 60_000 });
+    expect(result.timedOut).toBe(false); expect(result.outputLimited).toBe(false); expect(result.exitCode).toBe(3);
+    const log = await fs.readFile(result.logPath, 'utf8');
+    for (const marker of ['out line 0', 'err line 1', 'out line 19998', 'err line 19999', 'MIX-END']) expect(log).toContain(marker);
+    // The two pipes interleave arbitrarily in the log, so compare total size rather than line order.
+    let expected = 'MIX-END\n'.length; for (let i = 0; i < 20000; i++) expected += `${i % 2 ? 'err' : 'out'} line ${i}\n`.length;
+    expect(Buffer.byteLength(log.replace(/\r\n/g, '\n'))).toBeGreaterThanOrEqual(expected);
+  }, 70_000);
+
+  it('terminates a Node.js process that exceeds the 8 MiB observed-output limit', async () => {
+    const f = await fixture();
+    const command = await script(f, 'flood.mjs', "const chunk = 'z'.repeat(64 * 1024); let n = 0;\nconst pump = () => { while (n < 400) { n++; if (!process.stdout.write(chunk)) return process.stdout.once('drain', pump); } };\npump(); setTimeout(() => {}, 120000);\n");
+    const started = Date.now(); const result = await executePowerShell({ ...f, command, timeoutMs: 90_000 });
+    expect(result.outputLimited).toBe(true); expect(result.timedOut).toBe(false); expect(Date.now() - started).toBeLessThan(60_000);
+    expect(result.output).toContain('8MiB'); expect(result.output.length).toBeLessThan(1024 * 1024 + 1024);
+    const log = await fs.stat(result.logPath); expect(log.size).toBeGreaterThan(8 * 1024 * 1024); expect(log.size).toBeLessThan(26 * 1024 * 1024);
+    await waitFor(async () => (await fs.readdir(path.join(f.dataDir, 'owned-commands'))).length === 0);
+  }, 100_000);
+});
