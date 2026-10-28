@@ -18,17 +18,25 @@ public static class LocalCodeCommandJob {
  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr security, string name);
  [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref Extended info, uint size);
  [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr value);
  static IntPtr handle;
- public static void Attach() {
+ public static void Attach(uint parentPid) {
   handle=CreateJobObject(IntPtr.Zero,null); if(handle==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
   var limits=new Extended(); limits.BasicLimitInformation.LimitFlags=0x2000;
   if(!SetInformationJobObject(handle,9,ref limits,(uint)Marshal.SizeOf(typeof(Extended)))) { var err=Marshal.GetLastWin32Error(); CloseHandle(handle); throw new Win32Exception(err); }
   if(!AssignProcessToJobObject(handle,GetCurrentProcess())) { var err=Marshal.GetLastWin32Error(); CloseHandle(handle); throw new Win32Exception(err); }
-  // The worker owns the pipe's write end. EOF means its process exited even if
-  // the desktop never got a chance to read the durable PID ownership record.
-  var lifetime=new System.Threading.Thread(()=> { try { var input=Console.OpenStandardInput(); while(input.ReadByte()!=-1) {} } catch {} Environment.Exit(130); });
+  // Parent-death watchdog: waiting on the worker's process handle replaces the
+  // former stdin-EOF probe. Sharing the stdin pipe handle with grandchildren
+  // deadlocked CPython at interpreter shutdown (command code had already run,
+  // then the process hung until the outer timeout); see
+  // docs/incident-2026-10-28-python-command-deadlock.md.
+  const uint SYNCHRONIZE=0x00100000, WAIT_OBJECT_0=0;
+  var parent=OpenProcess(SYNCHRONIZE,false,parentPid);
+  if(parent==IntPtr.Zero) { Environment.Exit(130); }
+  var lifetime=new System.Threading.Thread(()=> { try { while(WaitForSingleObject(parent,5000)!=WAIT_OBJECT_0) {} CloseHandle(parent); Environment.Exit(130); } catch {} });
   lifetime.IsBackground=true; lifetime.Start();
  }
 }`;
@@ -44,12 +52,12 @@ export async function assertPowerShellExecutable(executable: string): Promise<vo
   }
   throw new Error(`未找到 Windows PowerShell 5.1：${executable}。请启用或修复 Windows 自带的 Windows PowerShell 后重试。使用云端模型不需要 Ollama，但执行终端命令仍需要此组件；命令尚未执行。`);
 }
-function bootstrap(command: string, token: string, readyPath: string) {
+function bootstrap(command: string, token: string, readyPath: string, parentPid: number) {
   // A non-interactive process cannot accidentally wait forever at Read-Host.
   const gate = readyPath.replaceAll("'", "''");
   // The command cannot run until its PID ownership record is durable. A worker
   // crash between spawn and record creation leaves a process that times out.
-  return `$ErrorActionPreference='Stop'\n$ProgressPreference='SilentlyContinue'\n[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false)\n[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)\n$OutputEncoding=[Console]::OutputEncoding\n$env:LOCALCODE_COMMAND_TOKEN='${token}'\nAdd-Type -TypeDefinition @'\n${jobCode}\n'@\n[LocalCodeCommandJob]::Attach()\n$deadline=[DateTime]::UtcNow.AddSeconds(15)\nwhile (-not [System.IO.File]::Exists('${gate}')) { if ([DateTime]::UtcNow -gt $deadline) { throw 'LocalCode command ownership handshake expired.' }; Start-Sleep -Milliseconds 50 }\nif ([System.IO.File]::ReadAllText('${gate}') -ne '${token}') { throw 'LocalCode command ownership handshake mismatch.' }\n[System.IO.File]::Delete('${gate}')\n$global:LASTEXITCODE=0\ntry {\n& {\n${command}\n}\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\nexit 0\n} catch { [Console]::Error.WriteLine($_.ToString()); exit 1 }`;
+  return `$ErrorActionPreference='Stop'\n$ProgressPreference='SilentlyContinue'\n[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false)\n[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)\n$OutputEncoding=[Console]::OutputEncoding\n$env:LOCALCODE_COMMAND_TOKEN='${token}'\nAdd-Type -TypeDefinition @'\n${jobCode}\n'@\n[LocalCodeCommandJob]::Attach(${parentPid})\n$deadline=[DateTime]::UtcNow.AddSeconds(15)\nwhile (-not [System.IO.File]::Exists('${gate}')) { if ([DateTime]::UtcNow -gt $deadline) { throw 'LocalCode command ownership handshake expired.' }; Start-Sleep -Milliseconds 50 }\nif ([System.IO.File]::ReadAllText('${gate}') -ne '${token}') { throw 'LocalCode command ownership handshake mismatch.' }\n[System.IO.File]::Delete('${gate}')\n$global:LASTEXITCODE=0\ntry {\n& {\n${command}\n}\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\nexit 0\n} catch { [Console]::Error.WriteLine($_.ToString()); exit 1 }`;
 }
 function capture(exe: string, args: string[], timeout = 10_000): Promise<{ code: number | null; text: string; errorText: string }> {
   return new Promise((resolve, reject) => {
@@ -72,7 +80,7 @@ export async function executePowerShell(options: { command: string; cwd: string;
   const owned = path.join(options.dataDir, 'owned-commands');
   const temp = path.join(options.dataDir, 'temp', 'commands');
   const readyPath = path.join(owned, `${token}.ready`);
-  const encodedCommand = Buffer.from(bootstrap(options.command, token, readyPath), 'utf16le').toString('base64');
+  const encodedCommand = Buffer.from(bootstrap(options.command, token, readyPath, process.pid), 'utf16le').toString('base64');
   await Promise.all([fs.mkdir(logs, { recursive: true }), fs.mkdir(owned, { recursive: true }), fs.mkdir(temp, { recursive: true })]);
   if (options.signal?.aborted) throw abortError();
   const logPath = path.join(logs, `${Date.now()}-${token}.log`);
@@ -81,8 +89,11 @@ export async function executePowerShell(options: { command: string; cwd: string;
   const stream = createWriteStream(logPath, { flags: 'wx' });
   stream.on('error', error => { spawnedError = error; stopOnLogError(); });
   stream.write(`Working directory: ${options.cwd}\nCommand:\n${options.command}\n\n`);
+  // stdin is deliberately closed (NUL): grandchildren must never inherit a
+  // live stdin pipe handle. The previous watchdog read that pipe for parent-death
+  // EOF and deadlocked CPython's interpreter shutdown on the shared handle.
   const child = spawn(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand], {
-    cwd: options.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: options.cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, TEMP: temp, TMP: temp, LOCALCODE_COMMAND_TOKEN: token },
   });
   const completion = new Promise<number | null>(resolve => {

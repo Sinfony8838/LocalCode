@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { executePowerShell, cleanupOwnedCommands, killActiveCommands } from '../src/core/command.js';
 import { createWorkspaceTools } from '../src/agent/tools.js';
 
@@ -49,6 +49,19 @@ win('Windows command lifecycle', () => {
     const result = await executePowerShell({ ...f, command: "[Console]::WriteLine('中文输出'); [Console]::WriteLine((Get-Location).Path); cmd.exe /c exit 7", timeoutMs: 20_000 });
     expect(result.exitCode).toBe(7); expect(result.cancelled).toBe(false); expect(result.output).toContain('中文输出'); expect(result.output).toContain(f.projectPath);
     expect(await fs.readFile(result.logPath, 'utf8')).toContain('中文输出'); expect(await fs.readdir(path.join(f.dataDir, 'owned-commands'))).toEqual([]);
+  }, 30_000);
+
+  // Regression: the former stdin-EOF watchdog let CPython deadlock at
+  // interpreter shutdown on the inherited stdin pipe handle, so every Python
+  // command ran to completion and then hung until the outer timeout.
+  it('completes native Python commands instead of hanging until timeout', async () => {
+    const probe = spawnSync('python', ['-c', 'print(1)'], { windowsHide: true, timeout: 15_000 });
+    if (probe.error || probe.status !== 0) return; // No usable Python here (e.g. Store stub); nothing to regress-test.
+    const f = await fixture();
+    const result = await executePowerShell({ ...f, command: `python -c "print('lc-python-ok')"`, timeoutMs: 20_000 });
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain('lc-python-ok');
   }, 30_000);
 
   it('retains complete observed output in the log while bounding model and UI output', async () => {
