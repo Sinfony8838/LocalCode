@@ -1,6 +1,6 @@
 {
   "name": "localcode-desktop",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "LocalCode - local-first coding workspace",

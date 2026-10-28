@@ -39,3 +39,6 @@
 **/tests/.artifact-actions-*/
 
 /portable-output/
+
+# Private desktop-pet atlases stay on this machine; they are bundled into local builds only.
+LocalCode/source/src/renderer/public/pets/
