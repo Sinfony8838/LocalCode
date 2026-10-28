@@ -1,5 +1,18 @@
 # Open-source release review
 
+## 0.2.4 backend localization, benchmark and executor regressions
+
+Prepared on 2026-10-29 (Asia/Shanghai). Merged pull requests [#12](https://github.com/Sinfony8838/LocalCode/pull/12) (five-task benchmark), [#13](https://github.com/Sinfony8838/LocalCode/pull/13) (command-executor regression tests) and [#14](https://github.com/Sinfony8838/LocalCode/pull/14) (backend message localization), each after green hosted Windows CI, plus this version bump.
+
+| Check | Result |
+| --- | --- |
+| Hosted Windows CI on each pull request and on `main` after merge | PASS; run links are recorded in the release's `release-manifest.json` |
+| Backend message coverage test (`tests/backend-i18n.test.ts`) | Added and passing |
+| Node.js, Git, long output and closed/non-interactive stdin through the executor | ADDED (Windows CI only; Python and Git cases skip when the tool is missing) |
+| Five-task benchmark harness self-test (pristine fixtures fail, references score 100) | PASS in CI |
+| Five-task comparison against a real agent/model | UNRUN; the harness is provided, no scores are claimed |
+| Real Ollama/GPU inference, real cloud requests, clean-Windows and reboot acceptance | UNRUN |
+
 ## 0.2.3 command-executor deadlock fix
 
 Prepared on 2026-10-29 (Asia/Shanghai). Source commits `9160167` (fix) and `c4a592a` (incident record and version bump), plus a documentation-only commit updating the READMEs, this review and `CHANGELOG.md`. 0.2.3 is the first GitHub Release after 0.2.1 and also ships the 0.2.2 changes below.
@@ -14,7 +27,7 @@ The approved-command executor's parent-death watchdog previously blocked on a st
 | Release archive | Built by hosted CI for the final documentation commit; exact commit, run and checksum are recorded in the release's `release-manifest.json` |
 | Real Ollama/GPU inference and real cloud requests for these bytes | UNRUN; automated checks use synthetic localhost providers |
 | Clean-Windows, fresh default Ollama and computer-reboot acceptance | UNRUN |
-| Regression coverage for other third-party runtimes (Node.js, Git, long output, interactive stdin) through the executor | NOT YET ADDED |
+| Regression coverage for other third-party runtimes (Node.js, Git, long output, interactive stdin) through the executor | NOT YET ADDED in 0.2.3; added in 0.2.4 |
 
 ## 0.2.2 session archive and delete
 
