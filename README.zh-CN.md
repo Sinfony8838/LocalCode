@@ -16,7 +16,7 @@
 
 聊天排版采用系统无衬线字体，默认正文 14 px、行高 24 px、段间距 12 px；可在“设置 → 外观”调整字号。停止状态和用时合并为一行，成功运行的用时显示在最终回复前；文件卡片先显示三个文件，其余可展开。固定统计范围说明不再占用聊天空间，实际统计异常仍会显示。
 
-> **Windows 下载：** [LocalCode 0.2.3 — Windows x64 便携包](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.3)。校验 `SHA256SUMS.txt` 后完整解压，双击 `Start.cmd`。更新前备份旧目录，并将新版解压到新目录，详见下文。
+> **Windows 下载：** [LocalCode 0.2.4 — Windows x64 便携包](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.4)。校验 `SHA256SUMS.txt` 后完整解压，双击 `Start.cmd`。更新前备份旧目录，并将新版解压到新目录，详见下文。
 
 ## 界面与回复语言
 
@@ -43,7 +43,7 @@
 | 下载的是什么 | 怎么辨认 | 第一步 |
 | --- | --- | --- |
 | GitHub **Code → Download ZIP** 或自动生成的 **Source code** 源码压缩包 | 有 `LocalCode/source/package.json`，没有已打包桌面 | 运行 `Setup.cmd`；使用云端 API 或已有 Ollama 时选 **2 — 仅桌面** |
-| GitHub Release 的 **Windows x64 便携包** | `LocalCode-0.2.3-windows-x64.zip` 内有 `READ-ME-FIRST.txt` 和 `LocalCode/app/current.txt` | 完整解压，再运行 `Start.cmd`；Actions 产物需额外解压外层 ZIP |
+| GitHub Release 的 **Windows x64 便携包** | `LocalCode-0.2.4-windows-x64.zip` 内有 `READ-ME-FIRST.txt` 和 `LocalCode/app/current.txt` | 完整解压，再运行 `Start.cmd`；Actions 产物需额外解压外层 ZIP |
 
 如果该次工作流没有成功且未过期的产物，就没有对应的便携下载。修改源码 ZIP 的名字或只复制启动器，不能让源码变成可运行程序。
 
@@ -61,7 +61,7 @@
 
 ### 便携桌面版：解压即开
 
-在 [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.3) 下载 **`LocalCode-0.2.3-windows-x64.zip`** 与 **`SHA256SUMS.txt`**，公开发行附件无需登录 GitHub。用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 的校验值，完整解压应用目录后双击 `Start.cmd`。自动生成的 Source code ZIP 是源码，需要构建；Actions 仍是临时验证产物，下载需登录，且需再解压内层应用 ZIP。
+在 [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.4) 下载 **`LocalCode-0.2.4-windows-x64.zip`** 与 **`SHA256SUMS.txt`**，公开发行附件无需登录 GitHub。用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 的校验值，完整解压应用目录后双击 `Start.cmd`。自动生成的 Source code ZIP 是源码，需要构建；Actions 仍是临时验证产物，下载需登录，且需再解压内层应用 ZIP。
 
 1. 双击解压后的 **`Start.cmd`** 即可打开桌面，不需要编译工具，也不会自动下载模型。
 2. 在设置中选择连接方式：

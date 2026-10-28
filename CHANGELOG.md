@@ -2,6 +2,15 @@
 
 All notable changes to LocalCode are recorded here, compiled from the Git history and [docs/RELEASE_REVIEW.md](docs/RELEASE_REVIEW.md). Dates are Asia/Shanghai (UTC+8). Only versions that reached `main` are listed; intermediate candidate versions (for example 0.1.15–0.1.18 on the application-data isolation branch) are described in the release review. Only v0.2.1 and later have a GitHub Release.
 
+## 0.2.4 — 2026-10-29
+
+### Changed
+- Backend messages that reach the interface (skills, artifacts, commands, approval reasons, desktop pets, attachments and resources, workspace protection, runs/goals/plans, storage and session events) are now translated into English, Japanese and Korean. Approval reasons, goal reasons and notice banners are displayed through the translation layer; the folder-unavailable notice and file-picker titles follow the selected language. Model-facing prompts and tool text stay in Chinese by design. A coverage test fails when a new user-facing Chinese backend string lacks translations.
+
+### Added
+- `benchmarks/five-task/`: a repeatable five-task comparison benchmark (prepare / run / score / self-test) with automatic verifiers, a 0–5 manual rubric and Markdown/CSV scoresheets. T1 follows the previously documented task; T2–T5 are new.
+- Command-executor regression tests on Windows for Node.js (UTF-8 output, exit codes, closed stdin), Python `stdin.read()`/`input()`, PowerShell `Read-Host` in non-interactive mode, Git (init/commit/log/status and failure exit codes), 20,000 interleaved stdout/stderr lines and the 8 MiB output limit.
+
 ## 0.2.3 — 2026-10-28
 
 ### Fixed
