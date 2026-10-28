@@ -1,0 +1,11 @@
+{
+  "id": "T5-build-report",
+  "title": "Analyse a data file and write a structured report",
+  "language": "any",
+  "requires": [],
+  "protected": ["builds.json", "REPORT_SPEC.md"],
+  "prompt": {
+    "zh": "builds.json 是一段 CI 构建记录。请按 REPORT_SPEC.md 计算统计结果并写入 report.json（字段名和格式必须完全一致），再写一份不超过 10 行的中文 SUMMARY.md 概括主要发现。可以编写并运行脚本来计算，但不要修改 builds.json。",
+    "en": "builds.json contains CI build records. Compute the statistics defined in REPORT_SPEC.md and write them to report.json (field names and formats must match exactly), then write a SUMMARY.md of at most 10 lines describing the main findings. You may write and run a script to compute them, but do not modify builds.json."
+  }
+}
