@@ -119,10 +119,11 @@ export default function PetControls({ onCreateInProject, hasProject = false }: P
         <p className="lc-pet-create-note">{hasProject ? t('将准备当前项目的新任务，发送后使用所选模型。') : t('点击后选择项目，再准备定制任务。')}{' '}{t('已有素材可导入 PNG 图集或 pet.json，加入你的宠物库。')}</p>
       </form>}
 
+      <div className="lc-pet-current">
+        <span>{t('当前桌宠：{name}', { name: shown && current ? petName(current) : t('无') })}</span>
+        <label><input type="checkbox" checked={shown} disabled={busy || (!shown && !current?.available)} onChange={e => void save({ enabled: e.target.checked })}/><span>{t('显示桌宠')}</span></label>
+      </div>
       <div className="lc-pet-characters">
-        <div className={`lc-pet-character lc-pet-none ${!shown ? 'selected' : ''}`}><button type="button" disabled={busy} aria-label={t('不显示虚拟宠物')} aria-pressed={!shown} onClick={() => void save({ enabled: false })}>
-          <div className="lc-pet-preview"><div className="lc-pet-empty-capsule" aria-hidden="true"><EyeOff size={20}/><i/><Pause size={19}/><i/><ChevronDown size={21}/></div></div><strong>{t('无')}{!shown && <Check size={15}/>}</strong><small>{t('暂时收起桌面上的旅伴')}</small>
-        </button></div>
         {state.characters.map(character => {
           const selected = shown && state.preferences.selected === character.id;
           return <div key={character.id} className={`lc-pet-character ${selected ? 'selected' : ''}`}>

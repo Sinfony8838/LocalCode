@@ -11,6 +11,11 @@ All notable changes to LocalCode are recorded here, compiled from the Git histor
 - `benchmarks/five-task/`: a repeatable five-task comparison benchmark (prepare / run / score / self-test) with automatic verifiers, a 0–5 manual rubric and Markdown/CSV scoresheets. T1 follows the previously documented task; T2–T5 are new.
 - Command-executor regression tests on Windows for Node.js (UTF-8 output, exit codes, closed stdin), Python `stdin.read()`/`input()`, PowerShell `Read-Host` in non-interactive mode, Git (init/commit/log/status and failure exit codes), 20,000 interleaved stdout/stderr lines and the 8 MiB output limit.
 
+### Fixed
+- Sidebar: workspace rows inside a project group align flush with the "Recent" list instead of carrying double indentation.
+- Settings: removed the redundant explainer paragraphs under the Language and Appearance section headings.
+- Desktop pets: the "None" placeholder is no longer listed as a pet card; a status row above the pet grid shows the current companion ("None" when hidden) with a show/hide toggle.
+
 ## 0.2.3 — 2026-10-28
 
 ### Fixed

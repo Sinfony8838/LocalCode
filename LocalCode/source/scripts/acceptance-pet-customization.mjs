@@ -61,13 +61,13 @@ try {
   await settings();
   await page.getByRole('button', { name: '选择自定义旅伴 A', exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, '01-library-light.png') });
-  await page.getByRole('button', { name: '不显示虚拟宠物', exact: true }).click();
+  await page.getByText('当前桌宠：无', { exact: true }).waitFor();
   await until(() => page.evaluate(() => window.localpets.state()), value => !value.preferences.enabled, 'hidden');
   await page.getByRole('button', { name: '显示桌宠', exact: true }).click();
   await page.getByRole('button', { name: '暂停动画', exact: true }).click();
   await until(() => page.evaluate(() => window.localpets.state()), value => value.preferences.paused, 'paused');
   await page.getByRole('button', { name: '继续动画', exact: true }).click();
-  checks.push('preview, none, show/hide and pause controls persist through IPC');
+  checks.push('preview, status row, show/hide and pause controls persist through IPC');
   await page.getByRole('button', { name: '自定义', exact: true }).click();
   await page.getByLabel('桌宠大小', { exact: true }).selectOption('128');
   await until(() => page.evaluate(() => window.localpets.state()), value => value.preferences.size === 128, 'size saved');

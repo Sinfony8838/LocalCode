@@ -60,8 +60,6 @@ describe('application languages', () => {
     const html = renderToStaticMarkup(<LanguageControl value={locale} onChange={async () => {}} />);
     for (const name of Object.values(LOCALE_NAMES)) expect(html).toContain(name);
     expect(html).toContain(`value="${locale}" lang="${locale}" selected=""`);
-    expect(html).toContain(t('明确指定的回复语言优先。例如：用中文提问并要求英文回复时，将使用英文。'));
     expect(html).toContain(t('界面与交互语言'));
-    if (locale === 'en' || locale === 'ko') expect(html).not.toContain('界面和默认回复');
   });
 });

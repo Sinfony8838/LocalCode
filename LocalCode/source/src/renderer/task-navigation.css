@@ -10,14 +10,14 @@
 .task-sidebar-content .project-item > svg:last-child { opacity: 1; margin: 0; }
 .project-more { opacity: 0; width: 25px; margin-right: 3px; }
 .project-row:hover .project-more, .project-row:focus-within .project-more { opacity: 1; }
-.project-tasks { margin-left: 18px; }
+.project-tasks { margin-left: 2px; }
 .task-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; margin: 2px 0; }
 .task-row:hover { background: var(--hover); }
 .task-row.active { background: var(--selected); }
-.project-session-button { min-width: 0; display: flex; align-items: center; gap: 8px; flex: 1; padding: 8px 4px 8px 19px; text-align: left; font-size: .8125rem; }
+.project-session-button { min-width: 0; display: flex; align-items: center; gap: 8px; flex: 1; padding: 8px 4px 8px 12px; text-align: left; font-size: .8125rem; }
 .project-session-button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-task-row:hover .session-more, .project-task-row:focus-within .session-more, .project-task-row.active .session-more { opacity: 1; }
-.show-project-tasks { padding: 7px 19px; color: var(--faint); font-size: .8125rem; }
+.show-project-tasks { padding: 7px 12px; color: var(--faint); font-size: .8125rem; }
 .task-sidebar-content .session-list { padding: 0 2px; overflow: visible; }
 .task-sidebar-content .session-button { padding-left: 12px; }
 .sidebar-item-menu { position: fixed; z-index: 1100; width: 205px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }

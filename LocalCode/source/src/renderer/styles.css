@@ -348,7 +348,6 @@ svg { flex-shrink: 0; }
 .settings-layout { display: flex; min-height: 0; flex: 1; }.settings-nav { width: 175px; padding: 20px 12px; background: var(--panel); border-right: 1px solid var(--border); flex-shrink: 0; }.settings-nav > button { display: flex; align-items: center; gap: 9px; width: 100%; font-size: 0.75rem; color: var(--muted); padding: 11px 12px; border-radius: 7px; text-align: left; margin-bottom: 5px; }.settings-nav > button:hover { background: var(--hover); }.settings-nav > button.active { background: var(--selected); color: var(--text); }
 .settings-content { flex: 1; min-width: 0; padding: 27px 31px; overflow: auto; }.settings-section-heading h3 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; }.settings-section-heading p { color: var(--muted); font-size: 0.6875rem; margin: 0 0 22px; line-height: 1.8; }
 .language-setting .field { max-width: 360px; }
-.language-help { color: var(--muted); font-size: 0.75rem; line-height: 1.8; margin: 16px 0 0; }
 .settings-nav > button svg { flex-shrink: 0; }
 .connection-card { display: flex; align-items: center; gap: 11px; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; padding: 13px 14px; }.connection-card > div { flex: 1; min-width: 0; }.connection-card strong { font-size: 0.6875rem; font-weight: 500; }.connection-card p { color: var(--muted); font-size: 0.625rem; margin: 5px 0 0; line-height: 1.7; overflow-wrap: anywhere; }.connection-card.healthy { border-color: var(--border-strong); }
 .provider-tabs { display: flex; gap: 7px; flex-wrap: wrap; padding: 21px 0 17px; }.provider-tabs > button { display: flex; align-items: center; gap: 5px; font-size: 0.625rem; border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; color: var(--muted); }.provider-tabs > button:hover { background: var(--panel); }.provider-tabs > button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -359,7 +358,6 @@ svg { flex-shrink: 0; }
 .font-size-setting { padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 .font-size-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .font-size-heading h4 { margin: 0 0 7px; font-size: 0.8125rem; font-weight: 600; }
-.font-size-heading p { margin: 0; font-size: 0.6875rem; color: var(--muted); line-height: 1.8; }
 .font-size-heading .secondary-button { font-size: 0.6875rem; }
 .font-size-controls { display: flex; align-items: center; gap: 9px; margin-top: 16px; }
 .font-size-controls .field { width: 145px; }

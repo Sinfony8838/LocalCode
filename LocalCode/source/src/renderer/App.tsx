@@ -801,7 +801,7 @@ function SettingsDialog({ initialTab, returnFocusTo, settings, health, version, 
       {tab === 'language' && <LanguageControl value={settings.locale} onChange={onLocale} />}
       {tab === 'pets' && <PetControls onCreateInProject={onCreatePet} hasProject={hasProject} />}
       {tab === 'models' && <ModelSettings settings={settings} health={health} onHealth={onHealth} healthPending={healthPending} onSaved={onSaved} />}
-      {tab === 'appearance' && <><div className="settings-section-heading"><h3>{t("外观")}</h3><p>{t("为你的工作区选择舒适的配色与字号。")}</p></div><FontSizeControl value={settings.fontSize} onChange={onFontSize} /><div className="theme-options">{(['light', 'dark'] as const).map(theme => <button key={theme} className={`theme-option ${settings.theme === theme ? 'selected' : ''}`} onClick={() => void onTheme(theme)}><div className={`theme-preview ${theme}`}><i /><div><b /><span /><span /><em /></div><i /></div><span>{theme === 'light' ? <Sun size={15} /> : <Moon size={15} />}{theme === 'light' ? t("浅色") : t("深色")}{settings.theme === theme && <Check size={14} />}</span></button>)}</div></>}
+      {tab === 'appearance' && <><div className="settings-section-heading"><h3>{t("外观")}</h3></div><FontSizeControl value={settings.fontSize} onChange={onFontSize} /><div className="theme-options">{(['light', 'dark'] as const).map(theme => <button key={theme} className={`theme-option ${settings.theme === theme ? 'selected' : ''}`} onClick={() => void onTheme(theme)}><div className={`theme-preview ${theme}`}><i /><div><b /><span /><span /><em /></div><i /></div><span>{theme === 'light' ? <Sun size={15} /> : <Moon size={15} />}{theme === 'light' ? t("浅色") : t("深色")}{settings.theme === theme && <Check size={14} />}</span></button>)}</div></>}
       {tab === 'about' && <><div className="about-brand"><div className="brand-mark"><BrandLogo /></div><h3>LocalCode</h3><p>{t("让想法，在本地落地。")}</p><span>{t("版本 ")}{version || '0.1.0'}</span></div><div className="about-details"><div><span>{t("Agent 运行时")}</span><strong>pi SDK 1.4.0</strong></div><div><span>{t("默认运行方式")}</span><strong>{t("每个会话独立 Agent")}</strong></div><div><span>{t("文件权限")}</span><strong>{t("所选项目内自动修改")}</strong></div><div><span>{t("终端权限")}</span><strong>{t("每条命令单独确认")}</strong></div></div><p className="about-disclaimer">{t("终端命令以当前 Windows 用户权限运行。应用的项目范围校验不等于操作系统沙箱。")}</p><button className="secondary-button data-folder-button" onClick={onOpenData}><FolderOpen size={15} />{t("打开应用数据目录")}</button></>}
     </div></div></section></div>;
 }
@@ -818,12 +818,10 @@ export function LanguageControl({ value, onChange }: { value: AppLocale; onChang
     finally { setPending(false); }
   };
   return <section className="language-setting" aria-busy={pending}>
-    <div className="settings-section-heading"><h3>{t('语言')}</h3><p>{t('界面和默认回复使用所选语言，自动保存。')}</p></div>
+    <div className="settings-section-heading"><h3>{t('语言')}</h3></div>
     <label className="field"><span>{t('界面与交互语言')}</span><select aria-label={t('界面与交互语言')} value={value} disabled={pending} onChange={event => void change(event.target.value as AppLocale)}>
       {APP_LOCALES.map(locale => <option key={locale} value={locale} lang={locale}>{LOCALE_NAMES[locale]}</option>)}
     </select></label>
-    <p className="language-help">{t('切换后立即更新界面，已有会话从下一轮开始使用新语言。')}</p>
-    <p className="language-help">{t('明确指定的回复语言优先。例如：用中文提问并要求英文回复时，将使用英文。')}</p>
     {failure && <p className="inline-error" role="alert">{t(failure)}</p>}
   </section>;
 }
@@ -836,7 +834,7 @@ function FontSizeControl({ value, onChange }: { value: number; onChange: (value:
     try { await onChange(next); } finally { setPending(false); }
   };
   return <section className="font-size-setting" aria-label={t("字号设置")} aria-busy={pending}>
-    <div className="font-size-heading"><div><h4>{t("字号")}</h4><p>{t("聊天、代码预览和界面文字同步调整，自动保存。")}</p></div><button type="button" className="secondary-button" disabled={pending || value === DEFAULT_FONT_SIZE} onClick={() => void change(DEFAULT_FONT_SIZE)}>{t("恢复默认字号")}</button></div>
+    <div className="font-size-heading"><div><h4>{t("字号")}</h4></div><button type="button" className="secondary-button" disabled={pending || value === DEFAULT_FONT_SIZE} onClick={() => void change(DEFAULT_FONT_SIZE)}>{t("恢复默认字号")}</button></div>
     <div className="font-size-controls"><button type="button" className="secondary-button" aria-label={t("减小字号")} disabled={pending || value <= MIN_FONT_SIZE} onClick={() => void change(value - 1)}>A−</button><label className="field"><span className="sr-only">{t("字号")}</span><select aria-label={t("字号")} value={value} disabled={pending} onChange={event => void change(Number(event.target.value))}>{Array.from({ length: MAX_FONT_SIZE - MIN_FONT_SIZE + 1 }, (_, i) => MIN_FONT_SIZE + i).map(size => <option key={size} value={size}>{size} px{size === DEFAULT_FONT_SIZE ? t("（默认）") : ''}</option>)}</select></label><button type="button" className="secondary-button" aria-label={t("增大字号")} disabled={pending || value >= MAX_FONT_SIZE} onClick={() => void change(value + 1)}>A＋</button></div>
     <p className="font-size-preview">{t("文字预览：把想法一步步变成代码。")}</p>
   </section>;
