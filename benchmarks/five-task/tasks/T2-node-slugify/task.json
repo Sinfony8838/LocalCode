@@ -2,10 +2,17 @@
   "id": "T2-node-slugify",
   "title": "Implement a small Node.js function from a specification",
   "language": "JavaScript (Node.js)",
-  "requires": ["node"],
-  "protected": ["test/slug.test.mjs", "README.md", "package.json"],
+  "requires": [
+    "node"
+  ],
+  "protected": [
+    "test/slug.test.mjs",
+    "README.md",
+    "package.json"
+  ],
   "prompt": {
-    "zh": "请按 README.md 和 slug.mjs 注释中的要求实现 slugify。不要修改已有测试、README.md 或 package.json，也不要引入第三方依赖。完成后运行 `npm test`（或 `node --test test/`）确认通过。注意：评分时还会运行未公开的额外测试来检查规格中的边界情况。",
-    "en": "Implement slugify as specified in README.md and the comment in slug.mjs. Do not modify the existing tests, README.md or package.json, and do not add third-party dependencies. Run `npm test` (or `node --test test/`) afterwards to confirm. Scoring also runs additional hidden tests for edge cases in the specification."
-  }
+    "zh": "请按 README.md 和 slug.mjs 注释中的要求实现 slugify。不要修改已有测试、README.md 或 package.json，也不要引入第三方依赖。完成后运行 `npm test` 确认通过。注意：评分时还会运行未公开的额外测试来检查规格中的边界情况。",
+    "en": "Implement slugify as specified in README.md and the comment in slug.mjs. Do not modify the existing tests, README.md or package.json, and do not add third-party dependencies. Run `npm test` afterwards to confirm. Scoring also runs additional hidden tests for edge cases in the specification."
+  },
+  "tier": "L1"
 }

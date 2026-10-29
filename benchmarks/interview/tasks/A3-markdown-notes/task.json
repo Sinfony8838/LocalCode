@@ -1,0 +1,13 @@
+{
+  "id": "A3-markdown-notes",
+  "tier": "L2",
+  "title": "Build a markdown note editor with live preview and persistence",
+  "language": "HTML/CSS/JavaScript",
+  "requires": [],
+  "minutes": 35,
+  "protected": ["SPEC.md"],
+  "prompt": {
+    "zh": "请按 SPEC.md 在此文件夹创建 index.html：一个单文件的 Markdown 笔记编辑器（内联 CSS 和 JavaScript，不引用任何外部资源，不得引入 Markdown 库——自行实现渲染）。渲染规则（标题/加粗/斜体/行内代码/两种列表/段落/转义）必须与规格逐条一致。完成后说明你如何验证每条渲染规则和边界情况。",
+    "en": "Create index.html in this folder as specified in SPEC.md: a single-file Markdown note editor (inline CSS and JavaScript, no external resources, and no Markdown libraries — implement the rendering yourself). Every rendering rule (headings/bold/italic/inline code/both lists/paragraphs/escaping) must match the specification exactly. Afterwards, explain how you verified each rule and the edge cases."
+  }
+}

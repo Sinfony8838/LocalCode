@@ -1,0 +1,15 @@
+{
+  "id": "H4-large-report",
+  "tier": "L3",
+  "title": "Compute exact statistics over 150k events within a wall-clock budget",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 45,
+  "generate": "generate.mjs",
+  "referenceRun": "solve.mjs",
+  "protected": ["REPORT_SPEC.md", "generate.mjs", "events.ndjson"],
+  "prompt": {
+    "zh": "events.ndjson 是 15 万条 CI 构建事件。请严格按 REPORT_SPEC.md 编写 solve.mjs（Node、无第三方依赖，读取数据并写出 report.json），再运行它生成 report.json。注意规格中的每个定义：nearest-rank 百分位、half-up 舍入、并列时的决胜规则、键的排序。评分器会在 15 秒预算内运行你的 solve.mjs 并逐字段比对——先想清楚复杂度，避免超时。不要修改 events.ndjson 或 REPORT_SPEC.md。",
+    "en": "events.ndjson holds 150k CI build events. Write solve.mjs strictly per REPORT_SPEC.md (Node, no third-party dependencies, reads the data and writes report.json), then run it. Every definition matters: nearest-rank percentiles, half-up rounding, tie-breaking rules, key ordering. The verifier runs your solve.mjs under a 15-second wall-clock budget and compares every field — think about complexity first, timeouts score zero on computed fields. Do not modify events.ndjson or REPORT_SPEC.md."
+  }
+}

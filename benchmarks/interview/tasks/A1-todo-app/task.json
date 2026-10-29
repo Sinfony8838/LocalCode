@@ -1,0 +1,13 @@
+{
+  "id": "A1-todo-app",
+  "tier": "L2",
+  "title": "Build a complete todo list app from a specification",
+  "language": "HTML/CSS/JavaScript",
+  "requires": [],
+  "minutes": 25,
+  "protected": ["SPEC.md"],
+  "prompt": {
+    "zh": "请按 SPEC.md 在此文件夹创建 index.html：一个单文件的待办清单应用（内联 CSS 和 JavaScript，不引用任何外部资源；如使用表单，提交不得刷新页面）。所有元素 id 与 class 必须与规格完全一致。完成后请说明你如何验证各项行为，特别是边界情况（空输入、HTML 转义、编辑、持久化）。评分会探测规格中的全部行为与边界。",
+    "en": "Create index.html in this folder as specified in SPEC.md: a single-file todo app (inline CSS and JavaScript, no external resources; if you use a form, submitting it must not reload the page). Element ids and classes must match the specification exactly. Afterwards, explain how you verified each behaviour, especially edge cases (empty input, HTML escaping, editing, persistence). Scoring probes every behaviour and edge case in the spec."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "marklet",
+  "private": true,
+  "type": "module",
+  "description": "Markdown to HTML renderer with a hard-wired pipeline",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

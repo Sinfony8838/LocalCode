@@ -1,0 +1,13 @@
+{
+  "id": "H2-scheduler-bug",
+  "tier": "L3",
+  "title": "Diagnose and fix three root causes from vague support tickets",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 60,
+  "protected": ["README.md", "package.json", "SUPPORT_TICKETS.md", "test/timezone.test.mjs", "test/next-run.test.mjs", "test/catch-up.test.mjs", "test/schedule.test.mjs", "test/jobs.test.mjs", "test/scheduler.test.mjs"],
+  "prompt": {
+    "zh": "cronlite 是一个微型时区感知调度器。请阅读 SUPPORT_TICKETS.md 中的四张工单和 README.md 里的精确算法约定，先在本地复现每个问题，再找到并修复全部根本原因（不止一个，且可能互相掩盖）。不要修改 README.md、package.json、SUPPORT_TICKETS.md 或 test/ 下任何文件。完成后运行 `npm test` 确认现有测试仍然通过，并逐条说明：每个工单的根本原因是什么、你怎么复现的、为什么你的修复是对的。",
+    "en": "cronlite is a tiny timezone-aware scheduler. Read the four tickets in SUPPORT_TICKETS.md and the exact algorithm contract in README.md, reproduce every report locally first, then find and fix all root causes (there is more than one, and they can mask each other). Do not modify README.md, package.json, SUPPORT_TICKETS.md or anything under test/. Run `npm test` afterwards to confirm the existing tests still pass, and explain for each ticket: the root cause, how you reproduced it, and why your fix is correct."
+  }
+}

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todo</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; margin: 0; display: grid; place-items: start center; }
+  main { background: #fff; width: min(480px, 100vw - 24px); margin: 24px 0; padding: 16px 20px; border-radius: 10px; box-shadow: 0 2px 10px #0001; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #new-todo { flex: 1; min-width: 0; padding: 8px 10px; font-size: 1rem; }
+  button, .filters button { font-size: .9rem; padding: 6px 10px; cursor: pointer; }
+  .filters button.selected { font-weight: 700; text-decoration: underline; }
+  #todo-list { padding: 0; list-style: none; }
+  #todo-list li { display: flex; gap: 8px; align-items: center; padding: 8px 4px; border-bottom: 1px solid #eee; }
+  #todo-list li.done .title { text-decoration: line-through; color: #999; }
+  #todo-list .title { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+  #todo-list .destroy { border: 0; background: none; color: #c00; cursor: pointer; }
+  #todo-count { color: #666; font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Todo</h1>
+  <div class="row">
+    <input id="new-todo" placeholder="What needs to be done?" aria-label="new todo">
+    <button id="add-todo" type="button">Add</button>
+  </div>
+  <div class="row filters">
+    <input id="toggle-all" type="checkbox" aria-label="toggle all">
+    <button id="filter-all" type="button" class="selected">All</button>
+    <button id="filter-active" type="button">Active</button>
+    <button id="filter-completed" type="button">Completed</button>
+    <button id="clear-completed" type="button">Clear completed</button>
+  </div>
+  <ul id="todo-list"></ul>
+  <span id="todo-count"></span>
+</main>
+<script>
+  'use strict';
+  const STORAGE_KEY = 'todos';
+  let todos = load();
+  let filter = 'all';
+  let editing = null;
+
+  function load() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      return Array.isArray(raw) ? raw.filter(t => t && typeof t.title === 'string').map((t, i) => ({ id: t.id ?? i, title: t.title, done: !!t.done })) : [];
+    } catch { return []; }
+  }
+  const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+  const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const listEl = document.getElementById('todo-list');
+  const countEl = document.getElementById('todo-count');
+  const newInput = document.getElementById('new-todo');
+
+  function render() {
+    const view = todos.filter(t => filter === 'all' || (filter === 'active' ? !t.done : t.done));
+    listEl.innerHTML = view.map(t => {
+      const title = escapeHtml(t.title);
+      const row = editing === String(t.id)
+        ? `<input class="edit" value="${title}">`
+        : `<span class="title">${title}</span>`;
+      return `<li data-id="${t.id}"${t.done ? ' class="done"' : ''}>` +
+        `<input type="checkbox" class="toggle"${t.done ? ' checked' : ''}>${row}` +
+        `<button class="destroy" type="button" aria-label="delete">x</button></li>`;
+    }).join('');
+    const editInput = listEl.querySelector('input.edit');
+    if (editInput) {
+      editInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          const value = editInput.value.trim();
+          const item = todos.find(t => String(t.id) === String(editing));
+          if (item && value) item.title = value;
+          editing = null;
+          save(); render();
+        } else if (event.key === 'Escape') {
+          editing = null; render();
+        }
+      });
+    }
+    const left = todos.filter(t => !t.done).length;
+    countEl.textContent = left === 1 ? '1 item left' : `${left} items left`;
+    for (const id of ['filter-all', 'filter-active', 'filter-completed']) {
+      document.getElementById(id).classList.toggle('selected', id === `filter-${filter}`);
+    }
+    document.getElementById('clear-completed').hidden = !todos.some(t => t.done);
+    document.getElementById('toggle-all').checked = todos.length > 0 && todos.every(t => t.done);
+  }
+
+  function add() {
+    const value = newInput.value.trim();
+    if (!value) return;
+    todos.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: value, done: false });
+    newInput.value = '';
+    save(); render();
+  }
+  document.getElementById('add-todo').addEventListener('click', add);
+  newInput.addEventListener('keydown', event => { if (event.key === 'Enter') add(); });
+
+  listEl.addEventListener('click', event => {
+    const li = event.target.closest('li');
+    if (!li) return;
+    if (event.target.closest('.toggle')) {
+      const item = todos.find(t => String(t.id) === li.dataset.id);
+      if (item) { item.done = !item.done; save(); render(); }
+    } else if (event.target.closest('.destroy')) {
+      todos = todos.filter(t => String(t.id) !== li.dataset.id);
+      if (editing === li.dataset.id) editing = null;
+      save(); render();
+    }
+  });
+  listEl.addEventListener('dblclick', event => {
+    const li = event.target.closest('li');
+    if (!li) return;
+    editing = li.dataset.id;
+    render();
+  });
+
+  for (const id of ['filter-all', 'filter-active', 'filter-completed']) {
+    document.getElementById(id).addEventListener('click', () => { filter = id.slice('filter-'.length); render(); });
+  }
+  document.getElementById('clear-completed').addEventListener('click', () => { todos = todos.filter(t => !t.done); save(); render(); });
+  document.getElementById('toggle-all').addEventListener('change', event => {
+    const done = event.target.checked;
+    todos.forEach(t => { t.done = done; });
+    save(); render();
+  });
+
+  render();
+</script>
+</body>
+</html>

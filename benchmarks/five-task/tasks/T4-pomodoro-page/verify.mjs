@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { check, protectedCheck, run } from '../../lib/common.mjs';
+import { check, protectedCheck, run } from '../../../lib/common.mjs';
 
 // The behavioural probe runs the page's inline scripts in a child process with a
 // deliberately small DOM stub and a fake clock. Pages that rely on DOM APIs the

@@ -1,0 +1,13 @@
+{
+  "id": "A4-rate-limiter",
+  "tier": "L2",
+  "title": "Implement a token-bucket rate limiter from a specification",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 30,
+  "protected": ["README.md", "package.json", "test/ratelimit.test.mjs"],
+  "prompt": {
+    "zh": "请按 README.md 中的规格实现 ratelimit.mjs 里的 RateLimiter（令牌桶算法，时钟通过构造参数注入）。不要修改 README.md、package.json 或已有测试，不要引入第三方依赖。完成后运行 `npm test` 确认现有测试通过。注意：评分会运行未公开的边界情况测试（连续补充、retryAfterMs 取整、非法参数、peek 不产生副作用等）。",
+    "en": "Implement the RateLimiter class in ratelimit.mjs as specified in README.md (token bucket, with an injectable clock). Do not modify README.md, package.json or the existing tests, and do not add third-party dependencies. Run `npm test` afterwards to confirm the existing tests pass. Scoring also runs hidden edge-case tests (continuous refill, retryAfterMs rounding, invalid arguments, peek side effects, and more)."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "H3-refactor-plugins",
+  "tier": "L3",
+  "title": "Refactor a hard-wired renderer into a plugin pipeline without changing output",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 60,
+  "protected": ["README.md", "package.json", "docs/REFACTOR_PLAN.md", "test/render.test.mjs", "test/parse-blocks.test.mjs", "test/parse-inline.test.mjs", "test/escape.test.mjs", "test/api.test.mjs"],
+  "prompt": {
+    "zh": "marklet 是一个小型 markdown 渲染器，管线写死在 src/render.mjs 里。请按 docs/REFACTOR_PLAN.md 把它重构成插件管线：新增 createRenderer 与四类钩子，render(markdown) 的公开行为与渲染结果必须逐字节不变，现有导出和全部现有测试必须原样通过。不要修改 README.md、package.json、docs/ 或 test/ 下任何文件。完成后运行 `npm test`，并说明管线结构、钩子的执行顺序以及你如何确认输出逐字节一致。",
+    "en": "marklet is a small markdown renderer whose pipeline is hard-wired in src/render.mjs. Refactor it into the plugin pipeline described in docs/REFACTOR_PLAN.md: add createRenderer and the four hook types while render(markdown)'s public behaviour and rendered output stay byte-identical, and every existing export and test keeps working unmodified. Do not modify README.md, package.json, docs/ or anything under test/. Run `npm test` afterwards, and explain the pipeline structure, hook ordering, and how you verified the output is byte-identical."
+  }
+}

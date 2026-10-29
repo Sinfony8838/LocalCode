@@ -1,0 +1,13 @@
+{
+  "id": "A5-csv-toolkit",
+  "tier": "L2",
+  "title": "Implement an RFC4180-flavoured CSV parser and serializer",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 30,
+  "protected": ["README.md", "package.json", "test/csv.test.mjs"],
+  "prompt": {
+    "zh": "请按 README.md 中的规格实现 csv.mjs 里的 parseCsv 和 stringifyCsv。不要修改 README.md、package.json 或已有测试，不要引入第三方依赖。完成后运行 `npm test` 确认现有测试通过。注意：评分会运行未公开的边界情况测试（BOM、空行、引号转义的各个角落、错误处理、往返一致性）。",
+    "en": "Implement parseCsv and stringifyCsv in csv.mjs as specified in README.md. Do not modify README.md, package.json or the existing tests, and do not add third-party dependencies. Run `npm test` afterwards to confirm the existing tests pass. Scoring also runs hidden edge-case tests (BOM, empty lines, every quoting corner, error handling, round-tripping)."
+  }
+}

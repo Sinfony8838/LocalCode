@@ -1,4 +1,4 @@
-import { check, nodeTest, protectedCheck, run } from '../../lib/common.mjs';
+import { check, nodeTest, protectedCheck, run } from '../../../lib/common.mjs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 

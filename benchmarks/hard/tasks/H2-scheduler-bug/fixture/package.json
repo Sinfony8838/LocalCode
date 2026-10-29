@@ -1,0 +1,9 @@
+{
+  "name": "cronlite",
+  "private": true,
+  "type": "module",
+  "description": "Tiny timezone-aware scheduler with recovery replay",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

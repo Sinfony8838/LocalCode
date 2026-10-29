@@ -1,0 +1,9 @@
+{
+  "name": "taskflow",
+  "private": true,
+  "type": "module",
+  "description": "Small in-memory job queue with pluggable storage, clock and metrics",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

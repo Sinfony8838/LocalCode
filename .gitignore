@@ -42,3 +42,7 @@
 
 # Private desktop-pet atlases stay on this machine; they are bundled into local builds only.
 LocalCode/source/src/renderer/public/pets/
+
+# Private held-out benchmark tasks (never published)
+benchmarks/local-tasks/tasks/*
+!benchmarks/local-tasks/tasks/.gitkeep

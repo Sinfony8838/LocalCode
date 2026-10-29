@@ -1,0 +1,13 @@
+{
+  "id": "H1-queue-features",
+  "tier": "L3",
+  "title": "Implement retries with exponential backoff and a dead-letter queue in an unfamiliar codebase",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 60,
+  "protected": ["README.md", "package.json", "docs/FEATURE_REQUEST.md", "test/clock.test.mjs", "test/ids.test.mjs", "test/job.test.mjs", "test/events.test.mjs", "test/validate.test.mjs", "test/priority.test.mjs", "test/backoff.test.mjs", "test/storage.test.mjs", "test/metrics.test.mjs", "test/limits.test.mjs", "test/queue.test.mjs"],
+  "prompt": {
+    "zh": "这是一个叫 taskflow 的任务队列库。请先阅读 README.md 和 docs/FEATURE_REQUEST.md，然后按特性请求实现自动重试（指数退避）与死信队列，遵循仓库现有约定（状态转换走 job.mjs、时间一律用注入的 clock、持久化走 storage）。不要修改 README.md、package.json、docs/ 或 test/ 下任何文件。完成后运行 `npm test` 确认全部现有测试通过，并说明你改动了哪些模块、为什么。",
+    "en": "This is taskflow, a small job queue library. Read README.md and docs/FEATURE_REQUEST.md first, then implement automatic retries with exponential backoff and the dead-letter queue as requested, following the repo conventions (status changes go through job.mjs, time always comes from the injected clock, persistence goes through storage). Do not modify README.md, package.json, docs/ or anything under test/. Run `npm test` afterwards to confirm every existing test still passes, and explain which modules you changed and why."
+  }
+}

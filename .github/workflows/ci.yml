@@ -38,7 +38,7 @@ jobs:
         shell: pwsh
         run: .\scripts\Test-Setup.ps1
       - name: Test portable allowlist, restricted-policy acceptance launcher and benchmark harness
-        run: node --test scripts/tests/portable-bundle.test.mjs scripts/tests/acceptance-launcher.test.mjs scripts/tests/five-task-benchmark.test.mjs
+        run: node --test scripts/tests/portable-bundle.test.mjs scripts/tests/acceptance-launcher.test.mjs scripts/tests/benchmark-banks.test.mjs
       - run: npm ci
         working-directory: LocalCode/source
       - run: npm run typecheck

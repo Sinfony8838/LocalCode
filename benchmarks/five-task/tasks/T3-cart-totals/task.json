@@ -2,10 +2,16 @@
   "id": "T3-cart-totals",
   "title": "Diagnose a multi-file bug from a bug report",
   "language": "JavaScript (Node.js)",
-  "requires": ["node"],
-  "protected": ["BUG_REPORT.md", "package.json"],
+  "requires": [
+    "node"
+  ],
+  "protected": [
+    "BUG_REPORT.md",
+    "package.json"
+  ],
   "prompt": {
-    "zh": "请阅读 BUG_REPORT.md，找出并修复结账金额计算的根本原因（可能涉及多个文件），并在 test/ 下为报告中的每个场景补充回归测试。不要引入第三方依赖。完成后运行 `node --test test/` 确认通过，并说明每个根因。",
-    "en": "Read BUG_REPORT.md, find and fix the root causes of the wrong checkout totals (more than one file may be involved), and add regression tests under test/ for every scenario in the report. Do not add third-party dependencies. Run `node --test test/` afterwards and explain each root cause."
-  }
+    "zh": "请阅读 BUG_REPORT.md，找出并修复结账金额计算的根本原因（可能涉及多个文件），并在 test/ 下为报告中的每个场景补充回归测试。不要引入第三方依赖。完成后运行 `npm test` 确认通过，并说明每个根因。",
+    "en": "Read BUG_REPORT.md, find and fix the root causes of the wrong checkout totals (more than one file may be involved), and add regression tests under test/ for every scenario in the report. Do not add third-party dependencies. Run `npm test` afterwards and explain each root cause."
+  },
+  "tier": "L1"
 }

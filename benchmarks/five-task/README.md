@@ -1,5 +1,7 @@
 # Five-task comparison benchmark / 五任务对比评测
 
+This is the **L1 smoke tier** of the tiered benchmark — see `../README.md` for the full bank, the unified CLI (`benchmarks/run.mjs`) and the repeat-run median workflow. 本目录是分层题库的 **L1 冒烟层**，完整题库与统一命令见 `../README.md`。
+
 A repeatable way to compare LocalCode with another coding agent (for example Claude Code) **on the same API and model**. Each agent gets identical fresh copies of five small projects; a deterministic scorer then grades the resulting files and writes a side-by-side scoresheet.
 
 用于在**同一 API、同一模型**下对比 LocalCode 与其他编程 Agent（例如 Claude Code）。每个 Agent 拿到五个小项目的相同全新副本，评分脚本对结果文件做确定性评分，并生成对比评分表。
@@ -21,10 +23,10 @@ Hidden checks live in each task's `verify.mjs`, outside the prepared workspaces.
 ## Run a comparison / 运行对比
 
 ```powershell
-cd benchmarks\five-task
+cd benchmarks
 node run.mjs self-test                                   # harness sanity check
-node run.mjs prepare --out D:\bench\2026-10-29 --agent localcode   --lang zh
-node run.mjs prepare --out D:\bench\2026-10-29 --agent claude-code --lang zh
+node run.mjs prepare --out D:\bench\2026-10-29 --agent localcode   --lang zh --tier L1
+node run.mjs prepare --out D:\bench\2026-10-29 --agent claude-code --lang zh --tier L1
 ```
 
 `prepare` refuses to reuse an existing `<out>\<agent>` folder, so earlier runs are never overwritten. It writes one folder per task, `PROMPTS.md`, one `<task>.prompt.txt` per task and a `manual.json` record.

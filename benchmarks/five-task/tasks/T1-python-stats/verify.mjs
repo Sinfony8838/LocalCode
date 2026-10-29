@@ -1,4 +1,4 @@
-import { check, findPython, protectedCheck, run } from '../../lib/common.mjs';
+import { check, findPython, protectedCheck, run } from '../../../lib/common.mjs';
 
 const HIDDEN = `
 import json

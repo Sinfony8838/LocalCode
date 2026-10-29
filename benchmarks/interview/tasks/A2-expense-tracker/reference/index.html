@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expenses</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f6f7f9; margin: 0; display: grid; place-items: start center; }
+  main { background: #fff; width: min(560px, 100vw - 24px); margin: 24px 0; padding: 16px 20px; border-radius: 10px; box-shadow: 0 2px 10px #0001; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  input, select { padding: 7px 9px; font-size: .95rem; }
+  #exp-desc { flex: 2; min-width: 120px; } #exp-amount { width: 110px; } #exp-date { width: 140px; }
+  button { font-size: .9rem; padding: 7px 12px; cursor: pointer; }
+  #expense-list { list-style: none; padding: 0; }
+  #expense-list li { display: flex; gap: 10px; align-items: baseline; padding: 7px 4px; border-bottom: 1px solid #eee; }
+  #expense-list .desc { flex: 1; overflow-wrap: anywhere; }
+  #expense-list .cat { color: #556; font-size: .8rem; border: 1px solid #dde; border-radius: 10px; padding: 1px 8px; }
+  #expense-list .date { color: #889; font-size: .8rem; }
+  #expense-list .amt { font-variant-numeric: tabular-nums; }
+  #expense-list .destroy { border: 0; background: none; color: #c00; cursor: pointer; }
+  .summary { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline; margin-top: 10px; }
+  #total-amount { font-weight: 700; font-variant-numeric: tabular-nums; }
+  #cat-totals { color: #556; font-size: .85rem; white-space: pre-line; }
+  .inline-error { color: #c00; font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Expenses</h1>
+  <div class="row">
+    <input id="exp-desc" placeholder="Description" aria-label="description">
+    <input id="exp-amount" inputmode="decimal" placeholder="0.00" aria-label="amount">
+    <select id="exp-category" aria-label="category">
+      <option value="Food">Food</option>
+      <option value="Transport">Transport</option>
+      <option value="Housing">Housing</option>
+      <option value="Other">Other</option>
+    </select>
+    <input id="exp-date" placeholder="YYYY-MM-DD" aria-label="date">
+    <button id="add-expense" type="button">Add</button>
+  </div>
+  <p class="inline-error" id="add-error" role="alert" hidden></p>
+  <select id="category-filter" aria-label="filter">
+    <option value="all" selected>All</option>
+    <option value="Food">Food</option>
+    <option value="Transport">Transport</option>
+    <option value="Housing">Housing</option>
+    <option value="Other">Other</option>
+  </select>
+  <ul id="expense-list"></ul>
+  <p id="empty-message">No records yet.</p>
+  <div class="summary">
+    <span id="expense-count"></span>
+    <span>Total <span id="total-amount"></span></span>
+    <span id="cat-totals"></span>
+  </div>
+</main>
+<script>
+  'use strict';
+  const STORAGE_KEY = 'expenses';
+  const CATEGORIES = ['Food', 'Transport', 'Housing', 'Other'];
+
+  let expenses = load();
+  let filter = 'all';
+
+  function load() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      return Array.isArray(raw) ? raw.filter(r => r && typeof r.desc === 'string' && Number.isInteger(r.amountCents)) : [];
+    } catch { return []; }
+  }
+  const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+
+  // All money is stored as integer cents; display derives from cents so sums never drift.
+  const formatMoney = cents => {
+    const sign = cents < 0 ? '-' : '';
+    const abs = Math.abs(Math.round(cents));
+    const yuan = Math.trunc(abs / 100).toLocaleString('en-US');
+    const frac = String(abs % 100).padStart(2, '0');
+    return `${sign}¥${yuan}.${frac}`;
+  };
+
+  const listEl = document.getElementById('expense-list');
+  const countEl = document.getElementById('expense-count');
+  const totalEl = document.getElementById('total-amount');
+  const catTotalsEl = document.getElementById('cat-totals');
+  const emptyEl = document.getElementById('empty-message');
+  const errorEl = document.getElementById('add-error');
+
+  function render() {
+    const view = expenses.filter(r => filter === 'all' || r.category === filter);
+    listEl.innerHTML = view.map((r, i) =>
+      `<li><span class="desc">${escapeHtml(r.desc)}</span><span class="cat">${escapeHtml(r.category)}</span>` +
+      `<span class="date">${escapeHtml(r.date)}</span><span class="amt">${formatMoney(r.amountCents)}</span>` +
+      `<button class="destroy" type="button" aria-label="delete" data-i="${expenses.indexOf(r)}">x</button></li>`
+    ).join('');
+    countEl.textContent = `${expenses.length} records`;
+    const total = expenses.reduce((sum, r) => sum + r.amountCents, 0);
+    totalEl.textContent = formatMoney(total);
+    const byCat = CATEGORIES
+      .map(cat => [cat, expenses.filter(r => r.category === cat).reduce((sum, r) => sum + r.amountCents, 0)])
+      .filter(([, cents]) => cents !== 0)
+      .map(([cat, cents]) => `${cat}: ${formatMoney(cents)}`);
+    catTotalsEl.textContent = byCat.join('\n');
+    emptyEl.hidden = expenses.length > 0;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  document.getElementById('add-expense').addEventListener('click', () => {
+    const descEl = document.getElementById('exp-desc');
+    const amountEl = document.getElementById('exp-amount');
+    const catEl = document.getElementById('exp-category');
+    const dateEl = document.getElementById('exp-date');
+    const fail = message => { errorEl.textContent = message; errorEl.hidden = false; };
+    const desc = descEl.value.trim();
+    const parsed = Number(amountEl.value);
+    if (!desc) return fail('Description is required.');
+    if (amountEl.value.trim() === '' || !Number.isFinite(parsed) || parsed <= 0) return fail('Amount must be a positive number.');
+    const cents = Math.round((parsed + Number.EPSILON) * 100);
+    expenses.push({ desc, amountCents: cents, category: catEl.value, date: dateEl.value.trim() || '—' });
+    errorEl.hidden = true;
+    descEl.value = '';
+    amountEl.value = '';
+    save(); render();
+  });
+
+  listEl.addEventListener('click', event => {
+    const button = event.target.closest('.destroy');
+    if (!button) return;
+    const index = Number(button.dataset.i);
+    if (Number.isInteger(index) && expenses[index]) {
+      expenses.splice(index, 1);
+      save(); render();
+    }
+  });
+
+  document.getElementById('category-filter').addEventListener('change', event => {
+    filter = event.target.value;
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>

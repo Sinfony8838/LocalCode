@@ -1,0 +1,13 @@
+{
+  "id": "A2-expense-tracker",
+  "tier": "L2",
+  "title": "Build an expense tracker with aggregation, formatting and validation",
+  "language": "HTML/CSS/JavaScript",
+  "requires": [],
+  "minutes": 30,
+  "protected": ["SPEC.md"],
+  "prompt": {
+    "zh": "请按 SPEC.md 在此文件夹创建 index.html：一个单文件的记账应用（内联 CSS 和 JavaScript，不引用任何外部资源）。金额格式、聚合统计和校验规则必须与规格完全一致。完成后说明你如何验证了金额格式化（千分位、两位小数、四舍五入）和各类边界情况。",
+    "en": "Create index.html in this folder as specified in SPEC.md: a single-file expense tracker (inline CSS and JavaScript, no external resources). Money formatting, aggregation and validation rules must match the specification exactly. Afterwards, explain how you verified the formatting (thousands separators, two decimals, rounding) and each edge case."
+  }
+}

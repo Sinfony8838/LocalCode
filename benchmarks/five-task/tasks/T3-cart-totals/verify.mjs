@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { check, copyTree, nodeTest, protectedCheck, run, walk } from '../../lib/common.mjs';
+import { check, copyTree, nodeTest, protectedCheck, run, walk } from '../../../lib/common.mjs';
 
 const lamp = { sku: 'lamp', unitCents: 2450, quantity: 2, taxable: true };
 const book = { sku: 'book', unitCents: 1299, quantity: 3, taxable: false };

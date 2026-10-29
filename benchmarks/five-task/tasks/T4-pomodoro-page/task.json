@@ -3,9 +3,12 @@
   "title": "Build a small self-contained web page from a specification",
   "language": "HTML/CSS/JavaScript",
   "requires": [],
-  "protected": ["SPEC.md"],
+  "protected": [
+    "SPEC.md"
+  ],
   "prompt": {
     "zh": "请按 SPEC.md 在此文件夹创建 index.html：一个单文件的番茄钟页面（内联 CSS 和 JavaScript，不引用任何外部资源）。元素 id 必须与规格一致。完成后说明你如何验证了各项行为。",
     "en": "Create index.html in this folder as specified in SPEC.md: a single-file Pomodoro timer page (inline CSS and JavaScript, no external resources). Element ids must match the specification. Afterwards, explain how you verified each behaviour."
-  }
+  },
+  "tier": "L1"
 }

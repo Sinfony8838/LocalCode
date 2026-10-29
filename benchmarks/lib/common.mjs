@@ -5,11 +5,36 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const benchRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const tasksRoot = path.join(benchRoot, 'tasks');
+
+// A bank is any directory under benchmarks/ that contains a tasks/ folder.
+// Every task.json may set "tier"; the bank name provides the default.
+const TIERS_BY_BANK = { 'five-task': 'L1', interview: 'L2', hard: 'L3' };
+const TIER_ORDER = ['L1', 'L2', 'L3', 'private'];
+const IGNORED_BANKS = new Set(['lib', 'node_modules']);
+
+export async function listBanks() {
+  const entries = await fs.readdir(benchRoot, { withFileTypes: true });
+  const banks = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || IGNORED_BANKS.has(entry.name)) continue;
+    const tasksDir = path.join(benchRoot, entry.name, 'tasks');
+    const names = (await fs.readdir(tasksDir, { withFileTypes: true }).catch(() => []))
+      .filter(e => e.isDirectory()).map(e => e.name).sort();
+    if (names.length) banks.push({ name: entry.name, tier: TIERS_BY_BANK[entry.name] ?? 'private', taskNames: names });
+  }
+  return banks.sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.name.localeCompare(b.name));
+}
 
 export async function listTasks() {
-  const names = (await fs.readdir(tasksRoot, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
-  return Promise.all(names.map(async name => ({ ...JSON.parse(await fs.readFile(path.join(tasksRoot, name, 'task.json'), 'utf8')), dir: path.join(tasksRoot, name) })));
+  const out = [];
+  for (const bank of await listBanks()) {
+    for (const name of bank.taskNames) {
+      const dir = path.join(benchRoot, bank.name, 'tasks', name);
+      const task = JSON.parse(await fs.readFile(path.join(dir, 'task.json'), 'utf8'));
+      out.push({ ...task, bank: bank.name, tier: task.tier ?? bank.tier, dir });
+    }
+  }
+  return out.sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.id.localeCompare(b.id));
 }
 
 const IGNORED = new Set(['node_modules', '.git', '__pycache__', '.pytest_cache']);
@@ -78,4 +103,11 @@ export function nodeTest(cwd, files, timeout = 60_000) {
   const pass = Number(/^# pass (\d+)/m.exec(result.stdout)?.[1] ?? 0);
   const fail = Number(/^# fail (\d+)/m.exec(result.stdout)?.[1] ?? 0);
   return { ...result, pass, fail };
+}
+
+export function median(values) {
+  const nums = values.filter(v => typeof v === 'number').sort((a, b) => a - b);
+  if (!nums.length) return null;
+  const mid = Math.floor(nums.length / 2);
+  return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 }
