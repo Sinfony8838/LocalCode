@@ -184,7 +184,8 @@ win('Windows command runtimes', () => {
     const f = await fixture(); const started = Date.now();
     const result = await executePowerShell({ ...f, command: "$name = Read-Host 'Name'; [Console]::WriteLine('prompt-answered')", timeoutMs: 30_000 });
     expect(result.timedOut).toBe(false); expect(result.exitCode).toBe(1); expect(result.output).not.toContain('prompt-answered');
-    expect(result.output.toLowerCase()).toContain('noninteractive'); expect(Date.now() - started).toBeLessThan(25_000);
+    // PowerShell localizes this error; accept the English or Chinese wording.
+    expect(/noninteractive|非交互/i.test(result.output)).toBe(true); expect(Date.now() - started).toBeLessThan(25_000);
   }, 40_000);
 
   it('runs a git init / commit / log workflow and propagates git failures', async () => {

@@ -2,6 +2,11 @@
 
 All notable changes to LocalCode are recorded here, compiled from the Git history and [docs/RELEASE_REVIEW.md](docs/RELEASE_REVIEW.md). Dates are Asia/Shanghai (UTC+8). Only versions that reached `main` are listed; intermediate candidate versions (for example 0.1.15–0.1.18 on the application-data isolation branch) are described in the release review. Only v0.2.1 and later have a GitHub Release.
 
+## 0.2.5 — 2026-10-30
+
+### Added
+- The agent comparison benchmark is now a 14-task tiered question bank: the original five tasks (L1 smoke), a new interview-style bank (L2: complete todo/expense/markdown apps and rate-limiter/CSV libraries scored on weighted feature points with hidden edge cases) and a hard bank (L3: cross-file features in a synthetic task-queue repo, three masked root causes behind vague support tickets, a behaviour-preserving plugin refactor, and exact statistics over 150k events under a 15-second budget). A unified runner (`benchmarks/run.mjs`) adds tier/bank filters, per-tier subtotals and repeat-run medians; web-app tasks are probed by a dependency-free DOM runtime (`lib/dom-probe.mjs`); a gitignored `benchmarks/local-tasks/` bank holds private held-out tasks. The Windows CI harness check now covers every bank.
+
 ## 0.2.4 — 2026-10-29
 
 ### Changed
