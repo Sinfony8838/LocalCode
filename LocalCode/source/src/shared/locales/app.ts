@@ -139,6 +139,7 @@ export const appTranslations: Record<string, readonly [string, string, string]> 
   '保存': ['Save', '保存', '저장'],
   '[图片：': ['[Image: ', '[画像：', '[이미지: '],
   ' 秒': ['s', ' 秒', '초'],
+  '不足 1 秒': ['<1s', '1 秒未満', '1초 미만'],
   ' 秒 · 重试 ': ['s · Retry ', ' 秒 · 再試行 ', '초 · 재시도 '],
   '查看文件': ['View file', 'ファイルを表示', '파일 보기'],
   '输入': ['Input', '入力', '입력'],

@@ -233,6 +233,9 @@ svg { flex-shrink: 0; }
 .message-copy:hover, .message-copy:focus-visible { opacity: 1; }
 .streaming .markdown-body > :last-child::after { content: ''; display: inline-block; width: 5px; height: 12px; background: var(--accent); margin-left: 4px; vertical-align: middle; animation: breathe 1s infinite; }
 .tool-card { margin: 5px 0; border-radius: 7px; overflow: hidden; }
+.tool-thinking { padding: 5px 10px 0; }
+.tool-thinking + .tool-summary-row { border-top: 1px solid var(--border); }
+.tool-thinking .thinking-content { margin: 6px 0 8px 7px; max-height: 220px; }
 .tool-summary-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tool-summary-row:hover { background: var(--panel); }
 .tool-summary { display: flex; align-items: center; flex: 1; min-width: 0; padding: 7px 2px; gap: 8px; text-align: left; color: var(--muted); }

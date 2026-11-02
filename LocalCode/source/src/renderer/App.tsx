@@ -616,7 +616,21 @@ export default function App() {
   </div></ArtifactContext.Provider>;
 }
 
-function ConversationTimeline({ messages, tools, runs, status }: { messages: ChatMessage[]; tools: ToolRecord[]; runs: RunSummaryRecord[]; status: RunStatus }) {
+// Short inter-tool reasoning reads better folded into the tool card that
+// consumes it than as standalone "思考 · 不足 1 秒" rows between cards.
+const FOLDED_THINKING_MAX_MS = 2000;
+function foldableThinking(message: ChatMessage): MessagePart[] | null {
+  const parts = message.parts ?? [];
+  if (!parts.length || message.partial || message.text) return null;
+  let total = 0;
+  for (const part of parts) {
+    if (part.type !== 'thinking' || part.state !== 'completed' || !part.endedAt) return null;
+    total += Math.max(0, Date.parse(part.endedAt) - Date.parse(part.startedAt));
+  }
+  return total < FOLDED_THINKING_MAX_MS ? parts : null;
+}
+
+export function ConversationTimeline({ messages, tools, runs, status }: { messages: ChatMessage[]; tools: ToolRecord[]; runs: RunSummaryRecord[]; status: RunStatus }) {
   const finalRuns = useMemo(() => new Map(runs.filter(run => run.status === 'completed' && run.finalMessageId && messages.some(message => message.id === run.finalMessageId && message.role === 'assistant' && !message.partial && message.text.trim())).map(run => [run.finalMessageId!, run])), [messages, runs]);
   // Older histories have no per-run summaries. Only their last completed answer is copyable.
   const legacyFinal = !runs.length && status === 'completed' ? [...messages].reverse().find(message => message.role === 'assistant' && !message.partial && message.text.trim()) : undefined;
@@ -625,9 +639,26 @@ function ConversationTimeline({ messages, tools, runs, status }: { messages: Cha
     ...tools.map(tool => ({ type: 'tool' as const, id: tool.id, createdAt: tool.createdAt, tool })),
     ...runs.filter(run => run.status !== 'running' && run.endedAt).map(run => ({ type: 'summary' as const, id: run.runId, createdAt: run.endedAt!, run })),
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [messages, tools, runs]);
+  // Backward pass: thinking-only turns fold into the nearest following tool
+  // card; anything else between them (a reply, a summary) breaks adjacency.
+  const folded = useMemo(() => {
+    const byTool = new Map<string, MessagePart[]>();
+    const skipped = new Set<string>();
+    let target: string | undefined;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (item.type === 'tool') { target = item.id; continue; }
+      const parts = item.type === 'message' ? foldableThinking(item.message) : null;
+      if (target && parts) {
+        byTool.set(target, [...parts, ...(byTool.get(target) ?? [])]);
+        skipped.add(item.id);
+      } else target = undefined;
+    }
+    return { byTool, skipped };
+  }, [items]);
   return <>{items.map(item => item.type === 'message'
-    ? <React.Fragment key={`message-${item.id}`}>{finalRuns.has(item.id) && <RunTiming run={finalRuns.get(item.id)!} />}<Message message={item.message} />{item.id === legacyFinal?.id && <div className="reply-actions"><MessageCopy message={item.message} /></div>}</React.Fragment>
-    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} /> : <React.Fragment key={`run-${item.id}`}><RunSummary run={item.run} showTiming={!item.run.finalMessageId || !finalRuns.has(item.run.finalMessageId)} />{item.run.finalMessageId && finalRuns.has(item.run.finalMessageId) && <div className="reply-actions" data-run-id={item.run.runId}><MessageCopy message={messages.find(message => message.id === item.run.finalMessageId)!} /></div>}</React.Fragment>)}</>;
+    ? <React.Fragment key={`message-${item.id}`}>{!folded.skipped.has(item.id) && <>{finalRuns.has(item.id) && <RunTiming run={finalRuns.get(item.id)!} />}<Message message={item.message} />{item.id === legacyFinal?.id && <div className="reply-actions"><MessageCopy message={item.message} /></div>}</>}</React.Fragment>
+    : item.type === 'tool' ? <ToolCard key={`tool-${item.id}`} tool={item.tool} thinking={folded.byTool.get(item.id)} /> : <React.Fragment key={`run-${item.id}`}><RunSummary run={item.run} showTiming={!item.run.finalMessageId || !finalRuns.has(item.run.finalMessageId)} />{item.run.finalMessageId && finalRuns.has(item.run.finalMessageId) && <div className="reply-actions" data-run-id={item.run.runId}><MessageCopy message={messages.find(message => message.id === item.run.finalMessageId)!} /></div>}</React.Fragment>)}</>;
 }
 
 function MessageCopy({ message }: { message: ChatMessage }) {
@@ -665,7 +696,13 @@ function useClock(active: boolean) {
   useEffect(() => { if (!active) return; setTime(Date.now()); const timer = setInterval(() => setTime(Date.now()), 1000); return () => clearInterval(timer); }, [active]);
   return time;
 }
-function ThinkingPart({ part }: { part: MessagePart }) {
+// Interleaved models emit short reasoning between tool calls; a bare floor()
+// labels every sub-second block "0 秒" and floods the timeline.
+export function thinkingDuration(ms: number): string {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  return seconds > 0 ? `${seconds}${t(" 秒")}` : t("不足 1 秒");
+}
+export function ThinkingPart({ part }: { part: MessagePart }) {
   const active = part.state === 'streaming';
   const time = useClock(active);
   const [open, setOpen] = useState(active);
@@ -680,9 +717,9 @@ function ThinkingPart({ part }: { part: MessagePart }) {
       autoPosition.current = content.current.scrollTop;
     }
   }, [active, open, part.text]);
-  const seconds = Math.max(0, Math.floor(((part.endedAt ? Date.parse(part.endedAt) : time) - Date.parse(part.startedAt)) / 1000));
+  const duration = thinkingDuration((part.endedAt ? Date.parse(part.endedAt) : time) - Date.parse(part.startedAt));
   return <section className={`thinking-part ${part.state}`}>
-    <button className="thinking-summary" aria-expanded={open} onClick={() => setOpen(value => !value)}><Brain size={15} /><span>{active ? t("正在思考") : part.state === 'interrupted' ? t("思考已中断") : t("思考")} · {seconds}{t(" 秒")}</span><ChevronDown size={14} className={open ? 'rotate-180' : ''} /></button>
+    <button className="thinking-summary" aria-expanded={open} onClick={() => setOpen(value => !value)}><Brain size={15} /><span>{active ? t("正在思考") : part.state === 'interrupted' ? t("思考已中断") : t("思考")} · {duration}</span><ChevronDown size={14} className={open ? 'rotate-180' : ''} /></button>
     {open && <div ref={content} className="thinking-content" tabIndex={0} aria-label={t("模型返回的思考内容")} onScroll={event => { const el = event.currentTarget; if (Math.abs(el.scrollTop - autoPosition.current) > 1) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 30; }}><MarkdownText text={part.text || t("等待思考内容…")} /></div>}
   </section>;
 }
@@ -693,8 +730,9 @@ function ProgressIndicator({ progress }: { progress?: RunProgress }) {
   return <div className="thinking-indicator" role="status"><span /><span /><span /><span className="thinking-label">{labels[progress?.phase || 'waiting']}…{progress?.phase === 'retry' ? t(" {seconds} 秒 · 重试 {attempt}/2", { seconds: countdown, attempt: progress.attempt ?? 1 }) : ''}</span></div>;
 }
 
-function ToolCard({ tool }: { tool: ToolRecord }) {
+function ToolCard({ tool, thinking }: { tool: ToolRecord; thinking?: MessagePart[] }) {
   const [expanded, setExpanded] = useState(false);
+  const [thoughtOpen, setThoughtOpen] = useState(false);
   const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
   const summary = String(args.path || args.file_path || args.command || args.pattern || args.directory || '');
   const command = /powershell|shell|command/i.test(tool.name);
@@ -702,7 +740,9 @@ function ToolCard({ tool }: { tool: ToolRecord }) {
   const filePath = !command && typeof (args.path || args.file_path) === 'string' ? String(args.path || args.file_path) : '';
   const openable = Boolean(filePath && tool.status === 'completed' && !tool.isError);
   const label = t(TOOL_LABELS[tool.name] || tool.name);
+  const thoughtMs = (thinking ?? []).reduce((sum, part) => sum + Math.max(0, Date.parse(part.endedAt!) - Date.parse(part.startedAt)), 0);
   return <div className={`tool-card ${tool.status}`} onContextMenu={event => { if (filePath && tool.status === 'completed') void artifact?.showMenu(event, filePath); }}>
+    {!!thinking?.length && <div className="tool-thinking"><button className="thinking-summary" aria-expanded={thoughtOpen} onClick={() => setThoughtOpen(value => !value)}><Brain size={15} /><span>{t("思考")} · {thinkingDuration(thoughtMs)}</span><ChevronDown size={14} className={thoughtOpen ? 'rotate-180' : ''} /></button>{thoughtOpen && <div className="thinking-content" tabIndex={0} aria-label={t("模型返回的思考内容")}>{thinking.map((part, index) => <MarkdownText key={index} text={part.text} />)}</div>}</div>}
     <div className={`tool-summary-row ${openable ? 'has-file-link' : ''}`}><button className="tool-summary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{tool.status === 'running' ? <LoaderCircle className="spin" size={14} /> : tool.status === 'failed' ? <AlertCircle size={14} /> : command ? <Terminal size={14} /> : <FileCode2 size={14} />}<span className="tool-label">{label}</span>{!openable && <span className="tool-short-args" title={summary}>{summary}</span>}</button>{openable && <ArtifactLink path={filePath} className="tool-file-link" label={t("打开文件 {path}", { path: filePath })}><span>{filePath}</span></ArtifactLink>}{tool.status === 'completed' && <Check size={12} className="tool-success" />}<button className="tool-expand icon-button" aria-label={t(expanded ? '收起{label}详情' : '展开{label}详情', { label })} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><ChevronRight size={13} className={expanded ? 'rotate-90' : ''} /></button></div>
     {expanded && <div className="tool-details"><div className="tool-detail-heading">{t("输入")}</div><pre>{JSON.stringify(tool.args, null, 2)}</pre>{tool.result !== undefined && <><div className="tool-detail-heading">{tool.isError ? t('错误') : t('输出')}</div><pre>{tool.result || t('执行完成，无输出。')}</pre></>}{tool.status === 'running' && <div className="tool-waiting">{t("正在执行…")}</div>}</div>}
   </div>;

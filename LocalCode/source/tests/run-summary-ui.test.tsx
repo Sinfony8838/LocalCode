@@ -24,6 +24,12 @@ describe('runtime summary does not certify task verification', () => {
     expect(html).not.toContain('本轮运行结束');
   });
 
+  it('labels sub-second runs as under one second', () => {
+    const html = renderToStaticMarkup(<RunSummary run={{ ...summary, durationMs: 400 }} />);
+    expect(html).toContain('不足 1 秒');
+    expect(html).not.toContain('0秒');
+  });
+
   it('does not show an end record while the runtime is active', () => {
     expect(renderToStaticMarkup(<RunSummary run={{ ...summary, status: 'running' }} />)).toBe('');
   });

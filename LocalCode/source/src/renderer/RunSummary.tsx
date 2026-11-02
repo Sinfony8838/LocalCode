@@ -6,6 +6,7 @@ import { ArtifactLink } from './Artifacts';
 
 export function runDuration(ms = 0) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (!seconds) return t('不足 1 秒');
   return seconds >= 3600 ? t('{hours}小时{minutes}分钟{seconds}秒', { hours: Math.floor(seconds / 3600), minutes: Math.floor(seconds % 3600 / 60), seconds: seconds % 60 }) : seconds >= 60 ? t('{minutes}分钟{seconds}秒', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 }) : t('{seconds}秒', { seconds });
 }
 
