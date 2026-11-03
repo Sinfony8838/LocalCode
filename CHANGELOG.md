@@ -2,6 +2,11 @@
 
 All notable changes to LocalCode are recorded here, compiled from the Git history and [docs/RELEASE_REVIEW.md](docs/RELEASE_REVIEW.md). Dates are Asia/Shanghai (UTC+8). Only versions that reached `main` are listed; intermediate candidate versions (for example 0.1.15–0.1.18 on the application-data isolation branch) are described in the release review. Only v0.2.1 and later have a GitHub Release.
 
+## 0.2.10 — 2026-11-03
+
+### Fixed
+- Bare-filename artifact links resolve through a bounded same-basename project search when the session change journals have no match, preferring directories the sessions wrote into — a task-seeded `SPEC.md` next to the files the agent changed now opens. Prose tokens that merely contain a dot (`localStorage.todos`, `.edit`) are no longer rendered as clickable file links.
+
 ## 0.2.9 — 2026-11-03
 
 ### Fixed
