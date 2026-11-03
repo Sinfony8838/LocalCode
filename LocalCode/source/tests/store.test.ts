@@ -114,6 +114,15 @@ describe('durable UI index', () => {
     await expect(reopened.moveSession(standalone.id, p.id)).rejects.toThrow('任务结束');
     expect(reopened.session(standalone.id).projectId).toBeNull();
   });
+  it('renames a project and persists the updated name across restart', async () => {
+    const { store, p } = await setup();
+    const renamed = await store.renameProject(p.id, '  我的核心项目  ');
+    expect(renamed.name).toBe('我的核心项目');
+    const reopened = new Store(store.dataDir); await reopened.init();
+    expect(reopened.project(p.id).name).toBe('我的核心项目');
+    await expect(store.renameProject(p.id, '   ')).rejects.toThrow('项目名称不能为空。');
+    await expect(store.renameProject(randomUUID(), '测试')).rejects.toThrow('项目不存在');
+  });
   it('persists multiple models and toggles, preserves blank-key edits, and deletes only provider credentials', async () => {
     const { store, p, s } = await setup();
     await store.saveProvider({ id: 'ark', name: 'Ark', kind: 'anthropic', baseUrl: 'https://example.com', model: 'one', contextWindow: 32768, maxTokens: 4096, hasKey: false, enabled: true,

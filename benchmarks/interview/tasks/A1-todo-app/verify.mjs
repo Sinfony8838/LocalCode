@@ -18,7 +18,11 @@ p2.storage.removeItem('todos');
 const p3 = p2.reload();
 
 // from here on every helper reads the live page p3
-const lis = () => p3.qsa('#todo-list li');
+// SPEC rule 4 says filters "show" the right items; rule 5 names hidden attr,
+// display:none and DOM removal as equivalent hiding mechanisms — so count
+// visible items, not DOM presence.
+const visible = li => !li.hasAttribute('hidden') && li.style.display !== 'none';
+const lis = () => p3.qsa('#todo-list li').filter(visible);
 const text = li => li.textContent.trim();
 const doneOf = li => li.classList.contains('done');
 const clearHidden = () => { try { const el = p3.el('clear-completed'); return el.hidden === true || el.hidden === '' || el.style.display === 'none'; } catch { return true; } };

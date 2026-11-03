@@ -32,6 +32,8 @@ export const taskTranslations: Record<string, readonly [string, string, string]>
   '取消置顶项目': ['Unpin project', 'プロジェクトの固定を解除', '프로젝트 고정 해제'],
   '在此项目中新建任务': ['New task in this project', 'このプロジェクトで新しいタスク', '이 프로젝트에서 새 작업'],
   '重命名任务': ['Rename task', 'タスク名を変更', '작업 이름 변경'],
+  '重命名项目': ['Rename project', 'プロジェクト名を変更', '프로젝트 이름 변경'],
+  '项目名称': ['Project name', 'プロジェクト名', '프로젝트 이름'],
   '移入项目': ['Move to project', 'プロジェクトに移動', '프로젝트로 이동'],
   '归档任务': ['Archive task', 'タスクをアーカイブ', '작업 보관'],
   '恢复任务': ['Restore task', 'タスクを復元', '작업 복원'],

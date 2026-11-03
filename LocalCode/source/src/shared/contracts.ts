@@ -75,6 +75,7 @@ export interface LocalCodeApi {
  createSession(projectId?: string | null): Promise<SessionView>;
  moveSession(input: {sessionId: string; projectId: string}): Promise<SessionView>;
  setProjectPinned(input: {projectId: string; pinned: boolean}): Promise<Project>;
+ renameProject(input: {projectId: string; name: string}): Promise<Project>;
  setSidebar(input: Partial<SidebarPreferences>): Promise<SidebarPreferences>;
  openSession(sessionId: string): Promise<SessionView>;
  renameSession(input: {sessionId: string; title: string}): Promise<SessionView>;

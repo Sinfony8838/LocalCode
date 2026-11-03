@@ -142,6 +142,7 @@ export const backendMessageTranslations: Record<string, readonly [string, string
   '缺少可信工作区上下文，已拒绝项目文件操作。': ['No trusted workspace context, so the project file operation was refused.', '信頼できるワークスペースのコンテキストがないため、プロジェクトファイルの操作を拒否しました。', '신뢰할 수 있는 작업 공간 정보가 없어 프로젝트 파일 작업을 거부했습니다.'],
   '项目根目录链接已变化，请重新选择实际项目目录。': ['The project root link has changed. Select the actual project folder again.', 'プロジェクトのルートリンクが変更されました。実際のプロジェクトフォルダーを選択し直してください。', '프로젝트 루트 링크가 변경되었습니다. 실제 프로젝트 폴더를 다시 선택하세요.'],
   '项目路径不是目录。': ['The project path is not a folder.', 'プロジェクトのパスはフォルダーではありません。', '프로젝트 경로가 폴더가 아닙니다.'],
+  '项目名称不能为空。': ['The project name cannot be empty.', 'プロジェクト名を空にすることはできません。', '프로젝트 이름은 비워 둘 수 없습니다.'],
   // Runs, goals and plans
   '审批已失效，操作未执行。': ['Approval expired. The action was not performed.', '承認は無効になりました。操作は実行されていません。', '승인이 만료되어 작업이 실행되지 않았습니다.'],
   '已切换到本地模型。': ['Switched to a local model.', 'ローカルモデルに切り替えました。', '로컬 모델로 전환했습니다.'],

@@ -10,10 +10,10 @@ const recent = (sessions: SessionView[]) => [...sessions].sort((a, b) => b.updat
 const byArchived = (sessions: SessionView[]) => [...sessions].sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''));
 type MenuTarget = { project: Project; session?: never } | { session: SessionView; project?: never };
 
-export default function TaskSidebar({ projects, sessions, activeProjectId, activeSessionId, preferences, onProject, onSession, onAddProject, onRename, onMove, onPin, onArchive, onDelete, onPreferences }: {
+export default function TaskSidebar({ projects, sessions, activeProjectId, activeSessionId, preferences, onProject, onSession, onAddProject, onRename, onRenameProject, onMove, onPin, onArchive, onDelete, onPreferences }: {
   projects: Project[]; sessions: SessionView[]; activeProjectId: string; activeSessionId: string; preferences: SidebarPreferences;
   onProject(id: string): void; onSession(session: SessionView): void; onAddProject(): void;
-  onRename(session: SessionView): void; onMove(session: SessionView): void; onPin(project: Project): void;
+  onRename(session: SessionView): void; onRenameProject?(project: Project): void; onMove(session: SessionView): void; onPin(project: Project): void;
   onArchive(session: SessionView, archived: boolean): void; onDelete(session: SessionView): void;
   onPreferences(patch: Partial<SidebarPreferences>): void;
 }) {
@@ -61,6 +61,7 @@ export default function TaskSidebar({ projects, sessions, activeProjectId, activ
       if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') || [])]; const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length]?.focus(); }
     }}>{menu.target.project ? <>
       <button role="menuitem" onClick={() => { onPin(menu.target.project!); closeMenu(); }}>{menu.target.project.pinned ? <PinOff size={15} /> : <Pin size={15} />}{menu.target.project.pinned ? t('取消置顶项目') : t('置顶项目')}</button>
+      <button role="menuitem" onClick={() => { onRenameProject?.(menu.target.project!); closeMenu(); }}><SquarePen size={15} />{t("重命名项目")}</button>
       <button role="menuitem" onClick={() => { onProject(menu.target.project!.id); closeMenu(); }}><SquarePen size={15} />{t("在此项目中新建任务")}</button>
     </> : <>
       <button role="menuitem" onClick={() => { onRename(menu.target.session!); closeMenu(); }}><SquarePen size={15} />{t("重命名任务")}</button>

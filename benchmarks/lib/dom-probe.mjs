@@ -88,15 +88,20 @@ function runtimeFactory() {
     return root;
   }
 
+  // Node-kind discriminator: plain parser nodes carry `type`; live Elements carry
+  // `_kind` so page code assigning e.g. `input.type = 'checkbox'` (a reflected
+  // attribute in the real DOM) cannot corrupt the tree walk.
+  function kindOf(n) { return n && n._kind !== undefined ? n._kind : n.type; }
+
   function serializeChildren(nodes) {
-    return nodes.map(n => n.type === 'text' ? encodeText(n.text) : serializeEl(n)).join('');
+    return nodes.map(n => kindOf(n) === 'text' ? encodeText(n.text) : serializeEl(n)).join('');
   }
   function serializeAttrValue(v) { return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
   function serializeEl(el) {
     const attrs = Object.entries(el.attrs).map(([k, v]) => v === '' ? ` ${k}` : ` ${k}="${serializeAttrValue(v)}"`).join('');
     // script/style/textarea content is raw text in HTML; everything else is escaped
     const inner = RAW.has(el._tagName)
-      ? el.children.map(n => n.type === 'text' ? n.text : serializeEl(n)).join('')
+      ? el.children.map(n => kindOf(n) === 'text' ? n.text : serializeEl(n)).join('')
       : serializeChildren(el.children);
     return `<${el._tagName}${attrs}>${inner}</${el._tagName}>`;
   }
@@ -177,7 +182,7 @@ function runtimeFactory() {
 
     class Element {
       constructor(tagName) {
-        this.type = 'el';
+        this._kind = 'el';
         this._tagName = String(tagName).toLowerCase();
         this.attrs = {};
         this.children = [];
@@ -193,6 +198,9 @@ function runtimeFactory() {
       set id(v) { this.attrs.id = String(v); }
       get tagName() { return this._tagName.toUpperCase(); }
       get className() { return this.attrs.class ?? ''; }
+      // reflected form-control attribute; never collides with the internal _kind discriminator
+      get type() { return this.attrs.type ?? ''; }
+      set type(v) { if (v === undefined || v === null || v === '') delete this.attrs.type; else this.attrs.type = String(v); }
       set className(v) { if (v) this.attrs.class = String(v); else delete this.attrs.class; }
       get dataset() {
         const out = {};
@@ -222,7 +230,7 @@ function runtimeFactory() {
       get hidden() { return this.attrs.hidden !== undefined; }
       set hidden(v) { if (v) this.attrs.hidden = ''; else delete this.attrs.hidden; }
       get textContent() {
-        return this.children.map(c => c.type === 'text' ? c.text : c.textContent).join('');
+        return this.children.map(c => kindOf(c) === 'text' ? c.text : c.textContent).join('');
       }
       set textContent(v) { this.children = [{ type: 'text', text: String(v) }]; }
       get innerText() { return this.textContent; }
@@ -234,15 +242,34 @@ function runtimeFactory() {
       get lastChild() { return this.children[this.children.length - 1] ?? null; }
       get nextSibling() { const s = this.parentNode?.children ?? []; return s[s.indexOf(this) + 1] ?? null; }
       get previousSibling() { const s = this.parentNode?.children ?? []; return s[s.indexOf(this) - 1] ?? null; }
-      get parentElement() { return this.parentNode?.type === 'el' ? this.parentNode : null; }
+      get parentElement() { return kindOf(this.parentNode) === 'el' ? this.parentNode : null; }
       appendChild(node) {
+        if (kindOf(node) === 'fragment') {
+          const kids = node.children; node.children = [];
+          for (const k of kids) this.appendChild(k);
+          return node;
+        }
         if (node.parentNode) node.parentNode.removeChild(node);
         node.parentNode = this;
         this.children.push(node);
         return node;
       }
-      prepend(node) { if (node.parentNode) node.parentNode.removeChild(node); node.parentNode = this; this.children.unshift(node); return node; }
+      prepend(node) {
+        if (kindOf(node) === 'fragment') {
+          const kids = [...node.children]; node.children = [];
+          for (let i = kids.length - 1; i >= 0; i--) { kids[i].parentNode = this; this.children.unshift(kids[i]); }
+          return node;
+        }
+        if (node.parentNode) node.parentNode.removeChild(node); node.parentNode = this; this.children.unshift(node); return node;
+      }
       insertBefore(node, ref) {
+        if (kindOf(node) === 'fragment') {
+          const at = ref ? this.children.indexOf(ref) : this.children.length;
+          const kids = [...node.children]; node.children = [];
+          let i = at === -1 ? this.children.length : at;
+          for (const k of kids) { k.parentNode = this; this.children.splice(i, 0, k); i += 1; }
+          return node;
+        }
         if (node.parentNode) node.parentNode.removeChild(node);
         const i = ref ? this.children.indexOf(ref) : -1;
         node.parentNode = this;
@@ -257,7 +284,28 @@ function runtimeFactory() {
       }
       remove() { if (this.parentNode) this.parentNode.removeChild(this); }
       replaceChild(node, old) { const i = this.children.indexOf(old); if (i === -1) return old; this.removeChild(old); this.insertBefore(node, this.children[i] ?? null); return old; }
-      contains(node) { for (const c of this.children) if (c === node || (c.type === 'el' && c.contains(node))) return true; return false; }
+      replaceChildren(...nodes) {
+        while (this.children.length) this.removeChild(this.children[0]);
+        for (const n of nodes) this.appendChild(typeof n === 'string' ? { type: 'text', text: n, parentNode: null } : n);
+      }
+      append(...nodes) {
+        for (const n of nodes) this.appendChild(typeof n === 'string' ? { type: 'text', text: n, parentNode: null } : n);
+      }
+      before(...nodes) {
+        if (!this.parentNode) return;
+        for (const n of nodes) this.parentNode.insertBefore(typeof n === 'string' ? { type: 'text', text: n, parentNode: null } : n, this);
+      }
+      after(...nodes) {
+        if (!this.parentNode) return;
+        const next = this.nextSibling;
+        for (const n of nodes) this.parentNode.insertBefore(typeof n === 'string' ? { type: 'text', text: n, parentNode: null } : n, next);
+      }
+      replaceWith(...nodes) {
+        if (!this.parentNode) return;
+        for (const n of nodes) this.parentNode.insertBefore(typeof n === 'string' ? { type: 'text', text: n, parentNode: null } : n, this);
+        this.remove();
+      }
+      contains(node) { for (const c of this.children) if (c === node || (kindOf(c) === 'el' && c.contains(node))) return true; return false; }
       getAttribute(name) { return this.attrs[String(name).toLowerCase()] ?? null; }
       setAttribute(name, v) { this.attrs[String(name).toLowerCase()] = String(v); }
       removeAttribute(name) { delete this.attrs[String(name).toLowerCase()]; }
@@ -268,6 +316,7 @@ function runtimeFactory() {
       dispatchEvent(event) { fire(this, event); return !event.defaultPrevented; }
       click() { fire(this, new Event('click', { target: this })); }
       focus() { if (activeDocument) activeDocument.activeElement = this; }
+      select() { /* text selection inside an input has no observable effect in the probe */ }
       blur() { if (activeDocument && activeDocument.activeElement === this) activeDocument.activeElement = activeDocument.body; }
       closest(selector) { let el = this; while (el) { if (el.matches && el.matches(selector)) return el; el = el.parentElement; } return null; }
       matches(selector) { return matches(this, selector); }
@@ -275,14 +324,14 @@ function runtimeFactory() {
       querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
       querySelectorAll(sel) {
         const out = [];
-        const walk = nodes => { for (const n of nodes) { if (n.type !== 'el') continue; out.push(n); walk(n.children); } };
+        const walk = nodes => { for (const n of nodes) { if (kindOf(n) !== 'el') continue; out.push(n); walk(n.children); } };
         walk(this.children);
         return out.filter(el => matches(el, sel));
       }
-      *descendants() { for (const c of this.children) { if (c.type === 'el') { yield c; yield* c.descendants(); } } }
+      *descendants() { for (const c of this.children) { if (kindOf(c) === 'el') { yield c; yield* c.descendants(); } } }
     }
 
-    function adopt(node, parent) { node.parentNode = parent; for (const c of node.children ?? []) if (c.type === 'el') adopt(c, node); }
+    function adopt(node, parent) { node.parentNode = parent; for (const c of node.children ?? []) if (kindOf(c) === 'el') adopt(c, node); }
 
     // parser output is plain objects; convert to live Elements (recursively)
     function hydrate(node) {
@@ -339,7 +388,7 @@ function runtimeFactory() {
       event.target = event.target ?? target;
       let node = target;
       while (node) {
-        if (node.type === 'el' || node.type === 'document' || node.type === 'window') {
+        if (kindOf(node) === 'el' || kindOf(node) === 'document' || kindOf(node) === 'window') {
           event.currentTarget = node;
           const listeners = [...(node.listeners?.get(event.type) ?? [])];
           for (const fn of listeners) {
@@ -348,10 +397,10 @@ function runtimeFactory() {
           }
         }
         if (event.stopped) return;
-        node = node.type === 'el' ? node.parentNode : null;
+        node = kindOf(node) === 'el' ? node.parentNode : null;
       }
       // window listeners receive bubbled document events
-      if (activeWindow && event.bubbles && target.type === 'document') {
+      if (activeWindow && event.bubbles && kindOf(target) === 'document') {
         event.currentTarget = activeWindow;
         for (const fn of [...(activeWindow.listeners.get(event.type) ?? [])]) { try { fn.call(activeWindow, event); } catch (error) { probeErrors.push(error); } }
       }
@@ -360,10 +409,15 @@ function runtimeFactory() {
     let activeDocument = null;
     let activeWindow = null;
 
+    class DocumentFragmentNode extends Element {
+      constructor() { super('#document-fragment'); this._kind = 'fragment'; }
+    }
+
     class DocumentNode extends Element {
-      constructor() { super('#document'); this.type = 'document'; this.readyState = 'loading'; this.activeElement = null; this.title = ''; }
+      constructor() { super('#document'); this._kind = 'document'; this.readyState = 'loading'; this.activeElement = null; this.title = ''; }
       getElementById(id) { return this.querySelectorAll(`#${CSS.id(id)}`)[0] ?? null; }
       createElement(tag) { return new Element(tag); }
+      createDocumentFragment() { return new DocumentFragmentNode(); }
       createTextNode(text) { return { type: 'text', text: String(text), parentNode: null }; }
       body = null;
       head = null;
@@ -380,11 +434,11 @@ function runtimeFactory() {
       const parsed = parseFragment(HTML_SOURCE);
       doc.children = parsed.children.map(hydrate);
       for (const c of doc.children) c.parentNode = doc;
-      doc.body = doc.children.find(c => c.type === 'el' && c._tagName === 'body') ?? doc;
-      doc.head = doc.children.find(c => c.type === 'el' && c._tagName === 'head') ?? doc;
-      doc.documentElement = doc.children.find(c => c.type === 'el' && c._tagName === 'html') ?? doc;
+      doc.body = doc.children.find(c => kindOf(c) === 'el' && c._tagName === 'body') ?? doc;
+      doc.head = doc.children.find(c => kindOf(c) === 'el' && c._tagName === 'head') ?? doc;
+      doc.documentElement = doc.children.find(c => kindOf(c) === 'el' && c._tagName === 'html') ?? doc;
       doc.activeElement = doc.body;
-      const titleEl = doc.head.children.find(c => c.type === 'el' && c._tagName === 'title');
+      const titleEl = doc.head.children.find(c => kindOf(c) === 'el' && c._tagName === 'title');
       if (titleEl) doc.title = titleEl.textContent;
 
       const window = new Element('#window');

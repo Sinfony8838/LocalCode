@@ -131,6 +131,14 @@ export class Store {
     const project = this.project(projectId); project.pinned = pinned;
     await this.persist(); return structuredClone(project);
   }
+  async renameProject(projectId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('项目名称不能为空。');
+    const project = this.project(projectId);
+    project.name = trimmed.slice(0, 100);
+    await this.persist();
+    return structuredClone(project);
+  }
   async setSidebar(patch: Partial<SidebarPreferences>) {
     for (const [key, value] of Object.entries(patch)) {
       if (key === 'collapsedProjects') { if (!Array.isArray(value)) throw new Error('折叠项目设置无效'); value.forEach(id => this.project(id)); }

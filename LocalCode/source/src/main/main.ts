@@ -327,6 +327,7 @@ const schemas: Record<string, z.ZodType> = {
   bootstrap: z.undefined(), pickProject: z.undefined(), createSession: id.nullish(), openSession: id,
   moveSession: z.object({ sessionId: id, projectId: id }).strict(),
   setProjectPinned: z.object({ projectId: id, pinned: z.boolean() }).strict(),
+  renameProject: z.object({ projectId: id, name: z.string().trim().min(1).max(100) }).strict(),
   setSidebar: z.object({ pinnedCollapsed: z.boolean(), projectsCollapsed: z.boolean(), recentCollapsed: z.boolean(), collapsedProjects: z.array(id).max(1000) }).partial().strict(),
   renameSession: z.object({ sessionId: id, title: z.string().trim().min(1).max(100) }).strict(),
   archiveSession: z.object({ sessionId: id, archived: z.boolean() }).strict(),
@@ -386,6 +387,7 @@ async function invoke(method: string, arg: any) {
       const moved = await store.moveSession(arg.sessionId, arg.projectId); emit({ type: 'state_changed' }); return moved;
     }
     case 'setProjectPinned': { const project = await store.setProjectPinned(arg.projectId, arg.pinned); emit({ type: 'state_changed' }); return project; }
+    case 'renameProject': { const project = await store.renameProject(arg.projectId, arg.name); emit({ type: 'state_changed' }); return project; }
     case 'setSidebar': { const sidebar = await store.setSidebar(arg); emit({ type: 'state_changed' }); return sidebar; }
     case 'openSession': await eventQueue; return structuredClone(store.session(arg));
     case 'renameSession': return store.renameSession(arg.sessionId, arg.title);
