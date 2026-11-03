@@ -17,6 +17,7 @@ const MANUAL_FIELDS = ['durationSeconds', 'toolCalls', 'userInterventions', 'inp
 const usage = `Usage:
   node run.mjs prepare   --out <dir> --agent <label> [--lang zh|en] [--tasks T1,A1] [--tier L1,L2] [--bank five-task]
   node run.mjs run       --out <dir> --agent <label> --cmd "<command using {promptFile}>" [--timeout-min 30]
+  node run.mjs sync-logs --out <dir> --agent <label> --log-dir <dataDir/logs>
   node run.mjs score     --out <dir> [--json]
   node run.mjs aggregate --out <dir>            # medians across repeated runs (labels like localcode-1, localcode-2)
   node run.mjs self-test [--tasks T1,A1] [--tier L2]
@@ -24,7 +25,7 @@ const usage = `Usage:
 
 const { positionals, values } = parseArgs({ allowPositionals: true, options: {
   out: { type: 'string' }, agent: { type: 'string' }, lang: { type: 'string', default: 'zh' }, tasks: { type: 'string' },
-  tier: { type: 'string' }, bank: { type: 'string' },
+  tier: { type: 'string' }, bank: { type: 'string' }, 'log-dir': { type: 'string' },
   cmd: { type: 'string' }, 'timeout-min': { type: 'string', default: '30' }, json: { type: 'boolean', default: false },
 } });
 const fail = message => { console.error(message); process.exit(2); };
@@ -92,13 +93,68 @@ async function runAgent(out, agent, command, timeoutMin) {
       const child = spawn(expanded, { cwd: path.join(root, id), shell: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BENCH_PROMPT_FILE: promptFile, BENCH_TASK: id } });
       const log = [];
       child.stdout.on('data', b => log.push(b)); child.stderr.on('data', b => log.push(b));
-      const timer = setTimeout(() => child.kill(), Number(timeoutMin) * 60_000);
+      const timer = setTimeout(() => {
+        if (process.platform === 'win32' && child.pid) {
+          spawn(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+        }
+        child.kill();
+      }, Number(timeoutMin) * 60_000);
       child.on('close', async exit => { clearTimeout(timer); await fs.writeFile(path.join(root, `${id}.agent.log`), Buffer.concat(log)); resolve(exit); });
     });
     manual[id].durationSeconds = Math.round((Date.now() - started) / 1000);
     manual[id].notes = [manual[id].notes, `automated run exit code ${code}`].filter(Boolean).join('; ');
   }
   await fs.writeFile(path.join(root, 'manual.json'), JSON.stringify(manual, null, 2) + '\n');
+}
+
+/** Extract telemetry (toolCalls, inputTokens, outputTokens, durationSeconds) from LocalCode agent-*.jsonl logs into manual.json. */
+export async function syncLogs(out, agent, logDir) {
+  const root = path.join(path.resolve(out), safeLabel(agent));
+  const { tasks } = JSON.parse(await fs.readFile(path.join(root, '_baseline.json'), 'utf8'));
+  const manual = JSON.parse(await fs.readFile(path.join(root, 'manual.json'), 'utf8').catch(() => '{}'));
+  const resolvedLogDir = path.resolve(logDir);
+  const norm = p => path.resolve(p).replace(/\\/g, '/').toLowerCase();
+  const sessionProject = new Map();
+  for (const candidate of [path.join(resolvedLogDir, 'index.json'), path.join(path.dirname(resolvedLogDir), 'index.json')]) {
+    const index = await fs.readFile(candidate, 'utf8').then(JSON.parse, () => null);
+    if (index?.projects && index?.sessions) {
+      const projects = new Map(index.projects.map(p => [p.id, norm(p.path)]));
+      for (const s of index.sessions) if (s.projectId && projects.has(s.projectId)) sessionProject.set(s.id, projects.get(s.projectId));
+    }
+  }
+  const byWorkspace = new Map(tasks.map(t => { const id = t.id ?? t; return [norm(path.join(root, id)), id]; }));
+  const stats = new Map();
+  const files = (await fs.readdir(resolvedLogDir).catch(() => [])).filter(f => /^agent-.*\.jsonl$/i.test(f)).sort();
+  for (const file of files) {
+    const lines = (await fs.readFile(path.join(resolvedLogDir, file), 'utf8')).split(/\r?\n/).filter(Boolean);
+    let taskId = null, inputTokens = 0, outputTokens = 0, toolCalls = 0, elapsedMs = 0;
+    for (const line of lines) {
+      let ev; try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.type === 'run_start') {
+        const ws = ev.projectPath ? norm(ev.projectPath) : sessionProject.get(ev.sessionId);
+        if (ws && byWorkspace.has(ws)) taskId = byWorkspace.get(ws);
+      } else if (ev.type === 'model_usage' && ev.usage) {
+        inputTokens += Number(ev.usage.input ?? ev.usage.inputTokens ?? ev.usage.prompt_tokens ?? 0) || 0;
+        outputTokens += Number(ev.usage.output ?? ev.usage.outputTokens ?? ev.usage.completion_tokens ?? 0) || 0;
+      } else if (ev.type === 'run_settled') {
+        toolCalls += Number(ev.toolCalls ?? 0) || 0;
+        elapsedMs += Number(ev.elapsedMs ?? 0) || 0;
+      }
+    }
+    if (taskId) {
+      const prev = stats.get(taskId) ?? { toolCalls: 0, inputTokens: 0, outputTokens: 0, elapsedMs: 0 };
+      stats.set(taskId, { toolCalls: prev.toolCalls + toolCalls, inputTokens: prev.inputTokens + inputTokens, outputTokens: prev.outputTokens + outputTokens, elapsedMs: prev.elapsedMs + elapsedMs });
+    }
+  }
+  for (const [id, s] of stats) {
+    manual[id] ??= Object.fromEntries(MANUAL_FIELDS.map(f => [f, null]));
+    manual[id].toolCalls = s.toolCalls;
+    manual[id].inputTokens = s.inputTokens;
+    manual[id].outputTokens = s.outputTokens;
+    manual[id].durationSeconds = Math.max(1, Math.round(s.elapsedMs / 1000));
+  }
+  await fs.writeFile(path.join(root, 'manual.json'), JSON.stringify(manual, null, 2) + '\n');
+  return Object.fromEntries(stats);
 }
 
 export async function scoreAgent(root) {
@@ -215,6 +271,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     if (command === 'prepare') { if (!values.out || !values.agent) fail(usage); console.log(`Prepared ${await prepare(values.out, values.agent, values)}`); }
     else if (command === 'run') { if (!values.out || !values.cmd) fail(usage); await runAgent(values.out, values.agent, values.cmd, values['timeout-min']); }
+    else if (command === 'sync-logs') { if (!values.out || !values.agent || !values['log-dir']) fail(usage); console.log(JSON.stringify(await syncLogs(values.out, values.agent, values['log-dir']), null, 2)); }
     else if (command === 'score') {
       if (!values.out) fail(usage);
       const agents = await score(values.out);

@@ -44,4 +44,10 @@ describe('session archive and delete navigation', () => {
     const html = renderToStaticMarkup(<TaskSidebar {...props([session('a1')])} />);
     expect(html).not.toContain('已归档');
   });
+
+  it('renders project rows without a leading chevron button', () => {
+    const html = renderToStaticMarkup(<TaskSidebar {...props([session('a1', { projectId: 'p1' })])} />);
+    expect(html).toContain('class="project-item ');
+    expect(html).not.toContain('project-chevron');
+  });
 });

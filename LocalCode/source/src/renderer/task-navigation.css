@@ -4,9 +4,8 @@
 .section-toggle { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0; text-align: left; font-size: var(--text-label); color: var(--muted); }
 .section-toggle:hover { color: var(--text); }
 .project-row { display: flex; align-items: center; min-width: 0; gap: 2px; border-radius: 8px; }
-.project-row:hover { background: var(--hover); }
-.project-chevron { width: 18px; height: 28px; color: var(--faint); }
-.task-sidebar-content .project-item { flex: 1; min-width: 0; width: auto; padding: 8px 2px; margin: 0; background: transparent; }
+.project-row:hover, .project-row.active { background: var(--hover); }
+.task-sidebar-content .project-item { flex: 1; min-width: 0; width: auto; padding: 8px 4px 8px 10px; margin: 0; background: transparent; }
 .task-sidebar-content .project-item > svg:last-child { opacity: 1; margin: 0; }
 .project-more { opacity: 0; width: 25px; margin-right: 3px; }
 .project-row:hover .project-more, .project-row:focus-within .project-more { opacity: 1; }

@@ -11,7 +11,7 @@ import { translations } from '../src/shared/i18n';
  */
 const userFacingFiles = [
   'src/main/main.ts', 'src/main/attachments.ts', 'src/main/pets.ts', 'src/main/store.ts', 'src/main/artifacts.ts',
-  'src/core/pet-library.ts', 'src/core/resources.ts', 'src/core/workspace-context.ts', 'src/core/permissions.ts', 'src/core/artifacts.ts',
+  'src/core/pet-library.ts', 'src/core/resources.ts', 'src/core/workspace-context.ts', 'src/core/workspace.ts', 'src/core/permissions.ts', 'src/core/artifacts.ts',
   'src/core/command.ts', 'src/core/run-changes.ts', 'src/agent/skills.ts', 'src/shared/session-events.ts',
 ];
 /** Chinese literals in those files that are intentionally not translated, with the reason. */

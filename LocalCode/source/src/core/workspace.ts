@@ -98,23 +98,28 @@ export async function readWorkspaceText(ctx: WorkspaceContext, relative: string)
 }
 export async function listWorkspaceFiles(ctx: WorkspaceContext, directory = ''): Promise<FileEntry[]> {
   const target = await resolveWorkspacePath(ctx, directory, { directory: true });
+  const { rejectProtected } = await workspaceBoundary(ctx);
   const entries = await fs.readdir(target.absolute, { withFileTypes: true });
   const result: FileEntry[] = [];
   for (const entry of entries) {
     if (!visible(entry.name)) continue;
     const rel = [target.relative, entry.name].filter(Boolean).join('/');
     try {
-      await resolveWorkspacePath(ctx, rel, { allowMissing: true });
-      const stat = await fs.stat(path.join(target.absolute, entry.name));
+      normalizeRelative(rel);
+      const childAbs = path.join(target.absolute, entry.name);
+      rejectProtected(childAbs);
+      if (entry.isSymbolicLink()) await resolveWorkspacePath(ctx, rel, { allowMissing: true });
+      const stat = await fs.stat(childAbs);
+      if (stat.isFile() && stat.nlink > 1) continue;
       if (!stat.isDirectory() && !stat.isFile()) continue;
       result.push({ path: rel, name: entry.name, directory: stat.isDirectory() });
     } catch { /* Unsafe/unreadable links are omitted from automatic discovery. */ }
   }
   return result.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name, 'zh-CN')).slice(0, 500);
 }
-export async function walkWorkspaceFiles(ctx: WorkspaceContext, directory = '', maxFiles = 1500): Promise<string[]> {
+export async function walkWorkspaceFiles(ctx: WorkspaceContext, directory = '', maxFiles = 1500, maxDirs = 2000): Promise<string[]> {
   const queue = [directory]; const seen = new Set<string>(); const result: string[] = [];
-  while (queue.length && result.length < maxFiles && seen.size < 300) {
+  while (queue.length && result.length < maxFiles && seen.size < maxDirs) {
     const dir = queue.shift()!;
     const resolved = await resolveWorkspacePath(ctx, dir, { directory: true });
     const actual = (await fs.realpath(resolved.absolute)).toLowerCase();

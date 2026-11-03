@@ -3,6 +3,7 @@ import type { ArtifactInfo, ArtifactAction, ArtifactInputKind } from './artifact
 export type RunStatus = 'idle' | 'running' | 'awaiting_approval' | 'awaiting_input' | 'completed' | 'failed' | 'interrupted';
 export type ApprovalMode = 'ask' | 'auto' | 'full';
 export type WorkMode = 'execute' | 'plan';
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high';
 export interface AttachmentInfo { id: string; name: string; kind: 'image' | 'text' | 'folder'; size: number; mimeType?: string; previewUrl?: string }
 /** Private worker metadata. Never return storagePath through renderer IPC. */
 export interface AttachmentResource extends AttachmentInfo { storagePath: string }
@@ -28,8 +29,8 @@ export interface RunSummary { runId: string; startedAt: string; endedAt?: string
 export interface ToolRecord { id: string; runId: string; name: string; args: unknown; result?: string; isError?: boolean; status: 'running' | 'completed' | 'failed'; createdAt: string }
 export interface Approval { id: string; runId: string; sessionId: string; command: string; cwd: string; kind?: 'command' | 'read' | 'write'; resource?: string; preview?: string; permissionKey?: string; toolCallId?: string; reason?: string }
 export interface SessionView { id: string; projectId: string | null; title: string; createdAt: string; updatedAt: string; archivedAt?: string; providerId: string; modelId?: string; piFile?: string; status: RunStatus; runId?: string; runs?: RunSummary[]; messages: ChatMessage[]; tools: ToolRecord[]; approval?: Approval; error?: string; progress?: RunProgress; approvalMode?: ApprovalMode; workMode?: WorkMode; question?: QuestionRecord; plan?: PlanRecord; goal?: GoalState }
-export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean; supportsImages?: boolean }
-export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; supportsImages?: boolean; ollamaMode?: 'managed' | 'existing' }
+export interface ModelConfig { id: string; contextWindow: number; maxTokens: number; enabled: boolean; supportsImages?: boolean; thinkingLevel?: ThinkingLevel }
+export interface ProviderConfig { id: string; name: string; kind: 'ollama' | 'openai' | 'anthropic' | 'responses'; baseUrl: string; model: string; contextWindow: number; maxTokens: number; hasKey: boolean; enabled?: boolean; models?: ModelConfig[]; supportsImages?: boolean; ollamaMode?: 'managed' | 'existing'; thinkingLevel?: ThinkingLevel; maxToolCalls?: number }
 export interface ProviderSecret extends ProviderConfig { apiKey: string }
 export interface AppSettings { theme: Theme; fontSize: number; locale: AppLocale; defaultProviderId: string; providers: ProviderConfig[]; sidebar?: SidebarPreferences }
 export interface LocalModelProbe { baseUrl: string; model: string; contextWindow: number; ollamaMode?: 'managed' | 'existing' }
@@ -62,7 +63,7 @@ export type AgentEvent = { runId: string; sessionId: string; recordedAt?: string
  | { type: 'settled'; status: 'completed' | 'failed' | 'interrupted'; error?: string; summary?: RunSummary }
  | { type: 'notice'; message: string }
 );
-export interface RunRequest extends WorkspaceContext { type: 'run'; runId: string; sessionId: string; projectPath: string; dataDir: string; piFile?: string; provider: ProviderSecret; prompt: string; approvalMode?: ApprovalMode; workMode?: WorkMode; grants?: string[]; attachments?: AttachmentResource[]; newAttachmentIds?: string[]; goal?: { id: string; objective: string }; automatic?: boolean; locale?: AppLocale }
+export interface RunRequest extends WorkspaceContext { type: 'run'; runId: string; sessionId: string; projectPath: string; dataDir: string; piFile?: string; provider: ProviderSecret; prompt: string; approvalMode?: ApprovalMode; workMode?: WorkMode; grants?: string[]; attachments?: AttachmentResource[]; newAttachmentIds?: string[]; goal?: { id: string; objective: string }; automatic?: boolean; locale?: AppLocale; thinkingLevel?: ThinkingLevel; maxToolCalls?: number; loadProjectInstructions?: boolean }
 export type WorkerCommand = RunRequest | { type: 'approve'; runId: string; approvalId: string; allow: boolean; scope?: 'once' | 'session' } | { type: 'answer'; runId: string; questionId: string; answers: string[][] | null } | { type: 'abort'; runId: string } | { type: 'shutdown' };
 export type TransportMessage = { runId: string; sessionId: string; requestId: string } & ({ type: 'request_acquire' } | { type: 'request_release'; cooldownUntil?: number } | { type: 'request_cancel' });
 export type TransportGrant = { type: 'request_grant'; runId: string; requestId: string };

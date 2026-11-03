@@ -101,7 +101,7 @@ try {
   await projectMenu('项目甲'); await page.getByRole('menuitem', { name: '置顶项目', exact: true }).click();
   await poll(async () => (await state()).projects.find(p => p.id === a.id).pinned, 'project pinned');
   await page.getByRole('button', { name: '收起置顶', exact: true }).click();
-  await page.getByRole('button', { name: '收起项目 项目乙', exact: true }).click();
+  await page.locator('.project-group[data-project-id="' + b.id + '"] .project-item').click();
   await page.getByRole('button', { name: '收起项目', exact: true }).click();
   await page.getByRole('button', { name: '收起最近', exact: true }).click();
   await poll(async () => { const p = (await state()).settings.sidebar; return p.pinnedCollapsed && p.projectsCollapsed && p.recentCollapsed && p.collapsedProjects.includes(b.id); }, 'collapsed preferences persisted');
@@ -113,8 +113,8 @@ try {
   assert.equal((await state()).projects.find(p => p.id === a.id).pinned, true);
   assert.equal((await state()).sessions.length, 2); assert.equal((await chat(first.id)).projectId, a.id); assert.equal((await chat(second.id)).projectId, b.id);
   await page.getByRole('button', { name: '展开置顶', exact: true }).click(); await page.getByRole('button', { name: '展开项目', exact: true }).click(); await page.getByRole('button', { name: '展开最近', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '展开项目 项目乙', exact: true }).count(), 1);
-  await page.getByRole('button', { name: '展开项目 项目乙', exact: true }).click();
+  assert.equal(await page.locator('.project-group[data-project-id="' + b.id + '"] .project-item[aria-expanded="false"]').count(), 1);
+  await page.locator('.project-group[data-project-id="' + b.id + '"] .project-item').click();
   await projectMenu('项目甲'); await page.getByRole('menuitem', { name: '取消置顶项目', exact: true }).click();
   await poll(async () => !(await state()).projects.find(p => p.id === a.id).pinned, 'unpin');
   await projectMenu('项目甲'); await page.getByRole('menuitem', { name: '置顶项目', exact: true }).click();
