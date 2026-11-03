@@ -2,6 +2,26 @@
 
 All notable changes to LocalCode are recorded here, compiled from the Git history and [docs/RELEASE_REVIEW.md](docs/RELEASE_REVIEW.md). Dates are Asia/Shanghai (UTC+8). Only versions that reached `main` are listed; intermediate candidate versions (for example 0.1.15–0.1.18 on the application-data isolation branch) are described in the release review. Only v0.2.1 and later have a GitHub Release.
 
+## 0.2.9 — 2026-11-03
+
+### Fixed
+- Artifact links: a bare filename the agent mentions in a reply (for example `index.html` while the file was written inside a task subfolder) now resolves through the project's session change journals instead of failing with ENOENT at the project root. A unique same-name change opens directly; several candidates raise a localized message listing them.
+
+## 0.2.8 — 2026-11-03
+
+### Added
+- Projects can be renamed from the sidebar; the store, IPC layer and UI track the new name.
+
+## 0.2.7 — 2026-11-03
+
+### Changed
+- Frontier agent optimizations (Step 0-6) and sidebar and modal UI refinements.
+
+## 0.2.6 — 2026-11-02
+
+### Fixed
+- Thinking-time labels are honest for sub-second durations and short reasoning is folded into tool cards.
+
 ## 0.2.5 — 2026-10-30
 
 ### Added
