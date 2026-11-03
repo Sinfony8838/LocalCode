@@ -185,3 +185,32 @@ describe('bare-filename fallback via session changes', () => {
     expect(seen).toEqual(['项目内有多个同名文件：{names}。请使用完整路径打开。']);
   });
 });
+
+describe('bare-filename project search fallback', () => {
+  it('finds a pre-existing file the agent never changed (seeded SPEC.md case)', async () => {
+    const f = await fixture();
+    const target = await resolveBareFilename(f.context, 'style.css', [], new Error('original'));
+    expect(target.relative).toBe('outputs/assets/style.css');
+  });
+  it('prefers same-name files inside directories the sessions wrote into', async () => {
+    const f = await fixture();
+    await fs.mkdir(path.join(f.project, 'elsewhere'), { recursive: true });
+    await fs.writeFile(path.join(f.project, 'elsewhere', 'style.css'), 'body{}');
+    // the session worked in outputs/assets (its change), so its style.css wins
+    const target = await resolveBareFilename(f.context, 'style.css', [{ path: 'outputs/assets/app.js' }], new Error('original'));
+    expect(target.relative).toBe('outputs/assets/style.css');
+  });
+  it('reports several candidates when no session directory disambiguates', async () => {
+    const f = await fixture();
+    await fs.mkdir(path.join(f.project, 'elsewhere'), { recursive: true });
+    await fs.writeFile(path.join(f.project, 'elsewhere', 'style.css'), 'body{}');
+    await expect(resolveBareFilename(f.context, 'style.css', [], new Error('original')))
+      .rejects.toThrow(/elsewhere\/style\.css.*outputs\/assets\/style\.css|outputs\/assets\/style\.css.*elsewhere\/style\.css/);
+  });
+  it('skips private directories during the search', async () => {
+    const f = await fixture();
+    await fs.mkdir(path.join(f.project, '.private'), { recursive: true });
+    await fs.writeFile(path.join(f.project, '.private', 'unique.css'), 'body{}');
+    await expect(resolveBareFilename(f.context, 'unique.css', [], new Error('original'))).rejects.toThrow('original');
+  });
+});

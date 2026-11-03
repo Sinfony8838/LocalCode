@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { Code2, Copy, ExternalLink, File, FileCode2, FolderOpen, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, RefreshCw, X } from 'lucide-react';
 import type { ArtifactAction, ArtifactInfo, ArtifactInputKind } from '../shared/artifacts';
 import type { FileView } from '../shared/contracts';
+import { KNOWN_FILE_EXTENSIONS } from '../shared/file-extensions';
 
 type ViewMode = 'preview' | 'source';
 type ArtifactController = ReturnType<typeof useArtifactController>;
@@ -12,6 +13,18 @@ export const ArtifactContext = createContext<ArtifactController | null>(null);
 export function isFileReference(value: string) {
   if (/^(?:https?:|mailto:|#)/i.test(value)) return false;
   return /^(?:file:|[a-z]:[\\/]|[./\\])/i.test(value) || /^[^\n<>]+\.[a-z\d]{1,12}(?:[?#].*)?$/i.test(value);
+}
+
+/**
+ * Gate for bare inline-code mentions (no directory part): prose tokens with a
+ * dot such as `localStorage.todos` or `.edit` must not become file links. A
+ * separator or explicit scheme proves path intent; otherwise the mention needs
+ * a known file extension.
+ */
+export function isBareFileMention(value: string) {
+  if (/[\\/]/.test(value) || /^(?:file:|[a-z]:[\\/])/i.test(value)) return true;
+  const dot = value.lastIndexOf('.');
+  return dot > 0 && KNOWN_FILE_EXTENSIONS.has(value.slice(dot + 1).toLowerCase());
 }
 export function markdownUrl(value: string) {
   return /^(?:https?:|mailto:)/i.test(value) || isFileReference(value) || !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(value) ? value : '';

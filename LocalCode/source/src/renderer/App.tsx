@@ -11,7 +11,7 @@ import ModelSettings from './ModelSettings';
 import Composer, { AttachmentStrip, emptyDraft, type ComposerDraft } from './Composer';
 import { ApprovalCard, GoalCard, PlanCard, QuestionCard } from './AgentControls';
 import TaskSidebar, { MoveTaskDialog, ProjectPicker } from './TaskNavigation';
-import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
+import { ArtifactContext, ArtifactLink, ArtifactMenu, ArtifactPanel, ExternalWebLink, isBareFileMention, isFileReference, markdownUrl, useArtifactController } from './Artifacts';
 import RunSummary, { RunTiming } from './RunSummary';
 import ChangeCheckpointDialog from './ChangeCheckpointDialog';
 import { reduceAgentEvent } from '../shared/session-events';
@@ -704,7 +704,7 @@ function Message({ message }: { message: ChatMessage }) {
 function MarkdownText({ text }: { text: string }) {
   return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} urlTransform={markdownUrl} skipHtml components={{
     a: ({ children, href }) => href && (isFileReference(href) || !/^(?:[a-z][a-z\d+.-]*:|#)/i.test(href)) ? <ArtifactLink path={href} inputKind="reference">{children}</ArtifactLink> : href && /^https?:\/\//i.test(href) ? <ExternalWebLink href={href}>{children}</ExternalWebLink> : <span>{children}</span>,
-    code: ({ children, className, node }) => !className && node?.position?.start.line === node?.position?.end.line && typeof children === 'string' && isFileReference(children) ? <ArtifactLink path={children} inputKind={/^file:/i.test(children) ? 'reference' : 'path'}><code>{children}</code></ArtifactLink> : <code className={className}>{children}</code>,
+    code: ({ children, className, node }) => !className && node?.position?.start.line === node?.position?.end.line && typeof children === 'string' && isFileReference(children) && isBareFileMention(children) ? <ArtifactLink path={children} inputKind={/^file:/i.test(children) ? 'reference' : 'path'}><code>{children}</code></ArtifactLink> : <code className={className}>{children}</code>,
     img: ({ alt, src }) => src && isFileReference(src) ? <ArtifactLink path={src} inputKind="reference">{alt || t('查看图片')}</ArtifactLink> : <span className="image-placeholder">{t('[图片：')}{alt || t('未加载')}]</span>,
   }}>{text}</ReactMarkdown></div>;
 }

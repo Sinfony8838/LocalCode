@@ -1,5 +1,6 @@
 import { workspaceBoundary, type WorkspaceContext } from './workspace-context';
 import fs from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -52,12 +53,35 @@ export async function resolveArtifactPath(ctx: WorkspaceContext, input: string, 
   return resolveWorkspacePath(ctx, normalizeRelative(candidate));
 }
 
+/** Bounded same-basename search over the project, skipping private directories. */
+const SEARCH_ENTRY_BUDGET = 20000;
+async function searchProjectByBasename(ctx: WorkspaceContext, wanted: string): Promise<string[]> {
+  const { root } = await workspaceBoundary(ctx);
+  const matches: string[] = [];
+  let budget = SEARCH_ENTRY_BUDGET;
+  const walk = async (dir: string, rel: string): Promise<void> => {
+    let entries: Dirent[];
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (budget-- <= 0 || matches.length >= 50) return;
+      if (entry.name.startsWith('.') || /^(?:node_modules|runtime)$/i.test(entry.name)) continue;
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await walk(path.join(dir, entry.name), childRel);
+      else if (entry.isFile() && entry.name.toLowerCase() === wanted) matches.push(childRel);
+    }
+  };
+  await walk(root, '');
+  return matches;
+}
+
 /**
  * Agents often mention bare filenames (e.g. `index.html`) while the file they
  * created lives in a working subfolder, so root-relative resolution fails with
- * ENOENT. The session change journal knows where files were actually written:
- * open the unique same-name change, list the candidates when several sessions
- * wrote the same name, and rethrow the original failure when nothing matches.
+ * ENOENT. The session change journal knows where files were actually written;
+ * a bounded project search covers pre-existing files the agent never wrote
+ * (e.g. a SPEC.md seeded per task folder), preferring directories the sessions
+ * actually worked in. Opens the unique best candidate, lists candidates when
+ * several remain, and rethrows the original failure when nothing matches.
  */
 export async function resolveBareFilename(
   ctx: WorkspaceContext,
@@ -67,14 +91,27 @@ export async function resolveBareFilename(
   translateMessage: (source: string, values: Record<string, string | number>) => string = (source, values) => source.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? '')),
 ): Promise<{ root: string; absolute: string; relative: string }> {
   const wanted = path.basename(name).toLowerCase();
-  const candidates = new Set<string>();
-  for (const change of changes) {
-    if (path.isAbsolute(change.path)) continue; // external writes resolve outside the project
-    if (path.basename(change.path).toLowerCase() === wanted) candidates.add(change.path);
+  const journal = [...changes].filter(change => !path.isAbsolute(change.path));
+  const byName = journal.filter(change => path.basename(change.path).toLowerCase() === wanted);
+  const openUnique = async (relative: string) => { try { return await resolveWorkspacePath(ctx, normalizeRelative(relative)); } catch { return null; } };
+  if (byName.length === 1) {
+    const target = await openUnique(byName[0].path);
+    if (target) return target;
+  }
+  const candidates = new Set<string>(byName.map(change => change.path));
+  if (candidates.size !== 1) {
+    // Directories the sessions wrote into rank plain search hits: the SPEC.md a
+    // conversation refers to is the one next to the files it changed.
+    const journalDirs = new Set(journal.map(change => path.posix.dirname(change.path.replace(/\\/g, '/'))));
+    const found = await searchProjectByBasename(ctx, wanted);
+    const ranked = found.filter(relative => journalDirs.has(path.posix.dirname(relative)));
+    for (const relative of ranked.length ? ranked : found) candidates.add(relative);
   }
   if (candidates.size === 1) {
-    try { return await resolveWorkspacePath(ctx, normalizeRelative([...candidates][0])); } catch { /* vanished since the change; report the original failure */ }
-  } else if (candidates.size > 1) {
+    const target = await openUnique([...candidates][0]);
+    if (target) return target;
+  }
+  if (candidates.size > 1) {
     throw new Error(translateMessage('项目内有多个同名文件：{names}。请使用完整路径打开。', { names: [...candidates].slice(0, 5).join('、') }));
   }
   throw original;
