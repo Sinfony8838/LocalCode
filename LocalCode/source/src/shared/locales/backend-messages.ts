@@ -16,6 +16,7 @@ export const backendMessageTranslations: Record<string, readonly [string, string
   '无效的文件路径。': ['Invalid file path.', 'ファイルパスが無効です。', '올바르지 않은 파일 경로입니다.'],
   '无效的网页链接。': ['Invalid web link.', 'Web リンクが無効です。', '올바르지 않은 웹 링크입니다.'],
   '此操作只接受本地文件。': ['This action accepts local files only.', 'この操作はローカルファイルのみ受け付けます。', '이 작업은 로컬 파일만 허용합니다.'],
+  '项目内有多个同名文件：{names}。请使用完整路径打开。': ['Several files in this project share that name: {names}. Open one via its full path instead.', 'プロジェクト内に同じ名前のファイルが複数あります：{names}。完全なパスで開いてください。', '이 프로젝트에 같은 이름의 파일이 여러 개 있습니다: {names}. 전체 경로로 열어 주세요.'],
   '此文件可能直接执行程序，请使用“选择其他应用打开”并选择编辑器。': ['This file may run a program directly. Use “Open with another app” and choose an editor.', 'このファイルはプログラムを直接実行する可能性があります。「別のアプリで開く」からエディターを選択してください。', '이 파일은 프로그램을 직접 실행할 수 있습니다. “다른 앱으로 열기”를 사용해 편집기를 선택하세요.'],
   '选择其他应用暂仅支持 Windows。': ['Choosing another app is currently supported on Windows only.', '別のアプリの選択は現在 Windows のみ対応しています。', '다른 앱 선택은 현재 Windows에서만 지원됩니다.'],
   // Commands

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ArtifactPreviews, MAX_PREVIEW_BYTES, resolveArtifactPath, externalBrowserUrl } from '../src/core/artifacts';
+import { ArtifactPreviews, MAX_PREVIEW_BYTES, resolveArtifactPath, resolveBareFilename, externalBrowserUrl } from '../src/core/artifacts';
 
 const base = path.resolve('tests');
 const roots: string[] = [];
@@ -149,5 +149,39 @@ describe('isolated preview capability', () => {
     const f = await fixture(); const info = await f.previews.info(f.context, 'outputs/页面 #1.html');
     await fs.unlink(path.join(f.project, 'outputs', '页面 #1.html'));
     expect((await f.previews.response({ url: info.previewUrl!, method: 'GET' })).status).toBe(404);
+  });
+});
+
+describe('bare-filename fallback via session changes', () => {
+  it('opens the unique same-name change when root resolution fails', async () => {
+    const f = await fixture();
+    await expect(resolveArtifactPath(f.context, '页面 #1.html')).rejects.toThrow();
+    const target = await resolveBareFilename(f.context, '页面 #1.html', [{ path: 'outputs/页面 #1.html' }], new Error('original'));
+    expect(target.relative).toBe('outputs/页面 #1.html');
+    expect(target.absolute).toBe(path.join(f.project, 'outputs', '页面 #1.html'));
+  });
+  it('matches case-insensitively and ignores external absolute change records', async () => {
+    const f = await fixture();
+    const target = await resolveBareFilename(f.context, 'APP.JS', [{ path: 'D:\elsewhere\app.js' }, { path: 'outputs/assets/app.js' }], new Error('original'));
+    expect(target.relative).toBe('outputs/assets/app.js');
+  });
+  it('lists candidates when several changes share the basename', async () => {
+    const f = await fixture();
+    await expect(resolveBareFilename(f.context, 'app.js', [{ path: 'outputs/assets/app.js' }, { path: 'other/app.js' }], new Error('original')))
+      .rejects.toThrow(/项目内有多个同名文件：.*outputs\/assets\/app\.js.*other\/app\.js.*请使用完整路径打开。/s);
+  });
+  it('rethrows the original failure when nothing matches or the file vanished', async () => {
+    const f = await fixture(); const original = new Error('original');
+    await expect(resolveBareFilename(f.context, 'missing.md', [{ path: 'outputs/assets/app.js' }], original)).rejects.toBe(original);
+    await expect(resolveBareFilename(f.context, '页面 #1.html', [{ path: 'outputs/页面 #1.html' }, { path: 'outputs/assets/app.js' }], original)).resolves.toBeDefined();
+    await fs.unlink(path.join(f.project, 'outputs', '页面 #1.html'));
+    await expect(resolveBareFilename(f.context, '页面 #1.html', [{ path: 'outputs/页面 #1.html' }], original)).rejects.toBe(original);
+  });
+  it('localizes the candidate list through the injected translate function', async () => {
+    const f = await fixture();
+    const seen: string[] = [];
+    await expect(resolveBareFilename(f.context, 'app.js', [{ path: 'outputs/assets/app.js' }, { path: 'other/app.js' }], new Error('original'),
+      (source, values) => { seen.push(source); return `EN(${values.names})`; })).rejects.toThrow('EN(outputs/assets/app.js、other/app.js)');
+    expect(seen).toEqual(['项目内有多个同名文件：{names}。请使用完整路径打开。']);
   });
 });

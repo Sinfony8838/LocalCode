@@ -52,6 +52,34 @@ export async function resolveArtifactPath(ctx: WorkspaceContext, input: string, 
   return resolveWorkspacePath(ctx, normalizeRelative(candidate));
 }
 
+/**
+ * Agents often mention bare filenames (e.g. `index.html`) while the file they
+ * created lives in a working subfolder, so root-relative resolution fails with
+ * ENOENT. The session change journal knows where files were actually written:
+ * open the unique same-name change, list the candidates when several sessions
+ * wrote the same name, and rethrow the original failure when nothing matches.
+ */
+export async function resolveBareFilename(
+  ctx: WorkspaceContext,
+  name: string,
+  changes: Iterable<{ path: string }>,
+  original: unknown,
+  translateMessage: (source: string, values: Record<string, string | number>) => string = (source, values) => source.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? '')),
+): Promise<{ root: string; absolute: string; relative: string }> {
+  const wanted = path.basename(name).toLowerCase();
+  const candidates = new Set<string>();
+  for (const change of changes) {
+    if (path.isAbsolute(change.path)) continue; // external writes resolve outside the project
+    if (path.basename(change.path).toLowerCase() === wanted) candidates.add(change.path);
+  }
+  if (candidates.size === 1) {
+    try { return await resolveWorkspacePath(ctx, normalizeRelative([...candidates][0])); } catch { /* vanished since the change; report the original failure */ }
+  } else if (candidates.size > 1) {
+    throw new Error(translateMessage('项目内有多个同名文件：{names}。请使用完整路径打开。', { names: [...candidates].slice(0, 5).join('、') }));
+  }
+  throw original;
+}
+
 export function artifactKind(filename: string): ArtifactKind {
   const extension = path.extname(filename).toLowerCase();
   if (extension === '.html' || extension === '.htm') return 'html';

@@ -11,7 +11,7 @@ import { GoalClock, canContinueGoal, continuationPrompt, DEFAULT_GOAL_BUDGET_MS,
 import { removeSessionChanges } from '../core/run-changes';
 import { removeSessionStorage } from '../core/session-storage';
 import { ArtifactController } from './artifacts';
-import { PREVIEW_SCHEME, resolveArtifactPath, externalBrowserUrl } from '../core/artifacts';
+import { PREVIEW_SCHEME, resolveArtifactPath, resolveBareFilename, externalBrowserUrl } from '../core/artifacts';
 import { createHash, randomUUID } from 'node:crypto';
 import { inspectLocalModel, localModelProbeSchema } from './local-model-health';
 import { managedOllamaState, startManagedOllama } from './managed-ollama';
@@ -364,15 +364,26 @@ async function artifactTarget(projectId: string, input: string, inputKind: 'path
   const root = store.workspace(projectId);
   try { const target = await resolveArtifactPath(root,input,inputKind); return {root,relative:target.relative,display:target.relative}; }
   catch (original) {
-    if (!path.isAbsolute(input) || /[\0\r\n]/.test(input)) throw original;
-    const absolute = path.resolve(input);
-    for (const session of store.sessions().filter(s=>s.projectId===projectId)) {
-      const changes = await getChanges(store.sessionWorkspace(session.id),session.id);
-      if (changes.some(change=>path.isAbsolute(change.path)&&path.resolve(change.path)===absolute)) {
-        const externalRoot = workspaceContext(path.dirname(absolute), dataDir); const relative = path.basename(absolute);
-        await resolveArtifactPath(externalRoot,relative);
-        return {root:externalRoot,relative,display:absolute};
+    if (/[\0\r\n]/.test(input)) throw original;
+    if (path.isAbsolute(input)) {
+      const absolute = path.resolve(input);
+      for (const session of store.sessions().filter(s=>s.projectId===projectId)) {
+        const changes = await getChanges(store.sessionWorkspace(session.id),session.id);
+        if (changes.some(change=>path.isAbsolute(change.path)&&path.resolve(change.path)===absolute)) {
+          const externalRoot = workspaceContext(path.dirname(absolute), dataDir); const relative = path.basename(absolute);
+          await resolveArtifactPath(externalRoot,relative);
+          return {root:externalRoot,relative,display:absolute};
+        }
       }
+      throw original;
+    }
+    // A bare filename the agent mentioned (e.g. `index.html` written inside a task subfolder)
+    // fails root-relative resolution; try the project's session change journals.
+    if (!/[/\\]/.test(input)) {
+      const changes: { path: string }[] = [];
+      for (const session of store.sessions().filter(s=>s.projectId===projectId)) changes.push(...await getChanges(store.sessionWorkspace(session.id),session.id));
+      const target = await resolveBareFilename(root,input,changes,original,tr);
+      return {root,relative:target.relative,display:target.relative};
     }
     throw original;
   }
