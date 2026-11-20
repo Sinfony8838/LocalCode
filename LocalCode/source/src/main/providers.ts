@@ -72,3 +72,35 @@ export async function testConnection(provider: ProviderSecret): Promise<{ messag
     throw new Error('连接失败或超过 30 秒，请检查网络、Base URL 和服务状态。');
   }
 }
+
+/** OpenCode-style auto session title: one small request, best-effort, never throws. */
+export async function generateSessionTitle(provider: ProviderSecret, prompt: string, timeoutMs = 9000): Promise<string | null> {
+  const anthropic = provider.kind === 'anthropic';
+  const responses = provider.kind === 'responses';
+  const endpoint = anthropic ? '/v1/messages' : responses ? '/responses' : '/chat/completions';
+  const instruction = '为下面的用户请求起一个简短标题：不超过 16 个字，概括任务主题。直接输出标题文本本身，不要引号、句号或任何解释。\n\n用户请求：' + prompt.slice(0, 500);
+  try {
+    const response = await fetch(provider.baseUrl.replace(/\/$/, '') + endpoint, {
+      method: 'POST', signal: AbortSignal.timeout(timeoutMs), redirect: 'error',
+      headers: { 'Content-Type': 'application/json', ...(anthropic ? { 'x-api-key': provider.apiKey, 'anthropic-version': '2023-06-01' } : { Authorization: `Bearer ${provider.apiKey}` }) },
+      body: JSON.stringify({ model: provider.model, stream: false, ...(responses
+        ? { input: instruction, max_output_tokens: 64 }
+        : { messages: [{ role: 'user', content: instruction }], max_tokens: 64, temperature: 0.2 }) }),
+    });
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return null; }
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+    const chunks: Uint8Array[] = []; let size = 0;
+    try { while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > 64 * 1024) return null; chunks.push(value); } }
+    finally { await reader.cancel().catch(() => {}); }
+    let data: any;
+    try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return null; }
+    const raw = anthropic ? (Array.isArray(data.content) ? data.content.filter((part: any) => part?.type === 'text').map((part: any) => part.text ?? '').join(' ') : '')
+      : responses ? (Array.isArray(data.output) ? data.output.filter((part: any) => part?.type === 'message').flatMap((part: any) => Array.isArray(part.content) ? part.content : []).map((part: any) => part?.text ?? '').join(' ') : '')
+        : (data.choices?.[0]?.message?.content ?? '');
+    const cleaned = String(raw).replace(/["'`*#「」『』\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[.。!！?？]+$/, '').slice(0, 24).trim();
+    return cleaned.length >= 2 ? cleaned : null;
+  } catch {
+    return null; // titling is cosmetic; never surface failures to the user
+  }
+}
