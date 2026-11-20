@@ -11,6 +11,7 @@ import { childResource, resolveResource, type ResolvedResource } from '../core/r
 import { evaluatePermission } from '../core/permissions.js';
 import { startBackgroundCommand, pollBackgroundProcess, stopBackgroundProcess } from '../core/process-manager.js';
 import { fetchWebText } from '../core/web-fetch.js';
+import { postEditSyntaxDiagnostic } from '../core/syntax.js';
 
 export type ApprovalRequest = Omit<Approval, 'id' | 'runId' | 'sessionId'>;
 
@@ -418,11 +419,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
         await writeWorkspaceText({ ...ctx, resourceRoot: checked.root, relativePath: checked.relative, displayPath: checked.displayPath, content: updated, expectedText: text });
         ctx.onFileModified?.(checked.displayPath);
         changed();
-        let diagnostic = '';
-        if (String(args.path).toLowerCase().endsWith('.json')) {
-          try { JSON.parse(updated); }
-          catch (err) { diagnostic = `\n[语法检查警告：修改后的 JSON 格式无效（${(err as Error).message}），请立即修复。]`; }
-        }
+        const diagnostic = await postEditSyntaxDiagnostic(checked.displayPath, updated);
         return result(`已修改 ${args.path}（共 ${hunks.length} 处替换），原始内容已保存，可在差异面板撤销。${diagnostic}`);
       },
     }),
@@ -435,11 +432,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): ToolDefinition[
         await writeWorkspaceText({ ...ctx, resourceRoot: resource.root, relativePath: resource.relative, displayPath: resource.displayPath, content: args.content as string });
         ctx.onFileModified?.(resource.displayPath);
         changed();
-        let diagnostic = '';
-        if (String(args.path).toLowerCase().endsWith('.json')) {
-          try { JSON.parse(String(args.content)); }
-          catch (err) { diagnostic = `\n[语法检查警告：写入的 JSON 格式无效（${(err as Error).message}），请立即修复。]`; }
-        }
+        const diagnostic = await postEditSyntaxDiagnostic(resource.displayPath, String(args.content));
         return result(`已写入 ${args.path}，修改记录已保存。${diagnostic}`);
       },
     }),
