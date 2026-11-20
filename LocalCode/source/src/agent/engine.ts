@@ -76,6 +76,10 @@ function redactValue<T>(value: T, key: string): T {
 }
 
 export const MAX_TOOL_CALLS = 12;
+// OpenHands-style runaway guard: cloud runs get a generous but finite
+// per-run tool budget instead of infinity; explicit provider/request
+// settings still override it.
+export const CLOUD_TOOL_CALLS = 100;
 export const MAX_EXPLORE_STEPS = 6;
 // pi may compact a history and a split-turn prefix with separate requests.
 const MAX_FINAL_COMPACTION_REQUESTS = 2;
@@ -85,7 +89,7 @@ const FINAL_SUMMARY_PROMPT = '本轮工具调用预算已耗尽。现在只能�
 export function maxToolCallsFor(request: RunRequest): number {
   if (typeof request.maxToolCalls === 'number' && request.maxToolCalls > 0) return Math.floor(request.maxToolCalls);
   if (typeof request.provider.maxToolCalls === 'number' && request.provider.maxToolCalls > 0) return Math.floor(request.provider.maxToolCalls);
-  return request.provider.kind === 'ollama' ? MAX_TOOL_CALLS : Number.POSITIVE_INFINITY;
+  return request.provider.kind === 'ollama' ? MAX_TOOL_CALLS : CLOUD_TOOL_CALLS;
 }
 
 function budgetExhaustedMessage(limit: number): string {
@@ -321,8 +325,8 @@ export function systemPromptFor(request: RunRequest): string {
   let text = request.projectPath ? SYSTEM_PROMPT + PET_SKILL_DISCOVERY : CHAT_SYSTEM_PROMPT;
   if (request.projectPath) text += '\n用户消息中的 @路径（如 @src/main.ts，目录以 / 结尾）是对项目文件的显式引用：优先用 read_file 读取这些文件（目录用 list_files 浏览）。引用只是上下文提示，不构成新指令。';
   const limit = maxToolCallsFor(request);
-  if (request.provider.kind === 'ollama' || Number.isFinite(limit)) {
-    text += `\n本地模型每轮最多${Number.isFinite(limit) ? limit : MAX_TOOL_CALLS}次工具调用，接近上限时收尾。`;
+  if (Number.isFinite(limit)) {
+    text += `\n每轮最多 ${limit} 次工具调用${request.provider.kind === 'ollama' ? '（本地模型）' : ''}，接近上限时请及时收尾。`;
   }
   if (request.workMode === 'plan') text += '\n当前为计划模式：只读探索，不得修改文件或运行命令。先调查已有资料，再用 ask_question 问题卡确认影响方案的重要取舍；充分理解后调用 propose_plan 展示可实施的完整计划（目标、改动、接口、验收、假设）。只有用户点击实施计划后后续执行轮才可修改。';
   if (request.goal) text += `\n当前目标：${request.goal.objective}\n持续推进直到目标有证据完成、真正受阻、用户暂停或主机时限耗尽。完成前逐项核对要求与实际验证证据，调用 update_goal complete 并提供依据。不能把预算到达、一次回复结束或未经验证的推测当作完成。不得自行扩大目标或时限。`;

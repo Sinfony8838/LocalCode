@@ -224,6 +224,11 @@ describe('Step 3: Loop Detector, Configurable Tool Budget, and Opt-in Project Co
     expect(maxToolCallsFor(baseReq)).toBe(12);
     expect(maxToolCallsFor({ ...baseReq, maxToolCalls: 30 })).toBe(30);
     expect(buildTurnContextReminder({ ...baseReq, maxToolCalls: 30 }, conventions)).toContain('每轮最多 30 次');
+    // Cloud providers default to a finite runaway guard instead of infinity.
+    const cloudReq = { ...baseReq, provider: { ...baseReq.provider, kind: 'openai' as const } };
+    expect(maxToolCallsFor(cloudReq)).toBe(100);
+    expect(maxToolCallsFor({ ...cloudReq, provider: { ...cloudReq.provider, maxToolCalls: 250 } })).toBe(250);
+    expect(buildTurnContextReminder(cloudReq, conventions)).toContain('每轮最多 100 次');
   });
 });
 
