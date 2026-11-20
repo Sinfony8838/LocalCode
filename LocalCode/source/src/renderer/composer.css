@@ -111,3 +111,11 @@
 .model-image-capability small { display: block; color: var(--faint); font-size: .6875rem; margin-top: 3px; line-height: 1.6; }
 @media (max-width: 1100px) { .codex-composer { padding: 14px 12px 10px; } .codex-composer .composer-options { gap: 4px; } .permission-trigger { padding: 5px 3px; } .composer-divider { margin: 0 2px; } .codex-composer .model-picker-trigger { max-width: 190px; } }
 @media (max-height: 760px) { .question-items { max-height: 30vh; } .plan-content { max-height: 27vh; } .goal-objective { max-height: 55px; } }
+
+/* Continue-style @-file reference completion menu */
+.mention-menu { position: absolute; top: 14px; left: 16px; right: 16px; z-index: 30; display: flex; flex-direction: column; padding: 6px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: 0 10px 28px #00000018; max-height: 240px; overflow-y: auto; }
+.mention-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border-radius: 9px; text-align: left; color: var(--text); font-size: .84rem; }
+.mention-menu button:hover, .mention-menu button.active { background: var(--hover); }
+.mention-menu button svg { flex: none; color: var(--muted); }
+.mention-menu button span { flex: none; font-weight: 500; }
+.mention-menu button small { margin-left: auto; color: var(--muted); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; max-width: 55%; }

@@ -3,7 +3,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUp, Check, FileText, Folder, Hand, Lightbulb, LoaderCircle, Paperclip, Plus, ShieldAlert, ShieldCheck, Square, Target, X } from 'lucide-react';
 import ModelPicker, { type ModelChoice } from './ModelPicker';
-import type { ApprovalMode, AttachmentInfo, GoalState, SessionView, WorkMode } from '../shared/contracts';
+import type { ApprovalMode, AttachmentInfo, FileEntry, GoalState, SessionView, WorkMode } from '../shared/contracts';
 
 export interface ComposerDraft {
   text: string;
@@ -16,6 +16,11 @@ export interface ComposerDraft {
 }
 export function emptyDraft(session?: SessionView): ComposerDraft {
   return { text: '', attachments: [], approvalMode: session?.approvalMode || 'ask', workMode: session?.workMode || 'execute' };
+}
+/** Detects the `@query` token ending at the caret; null when no live mention. */
+export function detectMentionToken(text: string, caret: number): { start: number; query: string } | null {
+  const match = /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
+  return match ? { start: caret - match[1].length - 1, query: match[1] } : null;
 }
 
 const permissions = [
@@ -87,13 +92,30 @@ function GoalEditor({ initial, onSave, onClose }: { initial?: ComposerDraft['goa
   }}><header><Target size={21} /><h2 id="goal-dialog-title">{t("设置目标")}</h2><button type="button" className="icon-button" aria-label={t("关闭目标设置")} onClick={onClose}><X size={18} /></button></header><p>{t("让 Agent 持续推进这项工作，直到完成、需要你的输入或达到预算。")}</p><label className="field"><span>{t("你希望完成什么？")}</span><textarea autoFocus aria-label={t("目标内容")} value={objective} maxLength={4000} rows={4} placeholder={t("例如：完成这个项目的功能实现与测试，并修复发现的问题。")} onChange={event => setObjective(event.target.value)} /></label><label className="field goal-budget-field"><span>{t("有效运行预算（小时）")}</span><input aria-label={t("目标运行预算")} type="number" min="0.25" max="24" step="0.25" value={hours} onChange={event => setHours(event.target.value)} /></label><small>{t("等待审批、等待回答、排队及暂停不计时。重启应用后需要手动恢复。")}</small><div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!valid}>{t("添加目标")}</button></div></form></div>, document.body);
 }
 
-export default function Composer({ draft, onChange, textareaRef, choices, selected, onModel, busy, pending, importing, stopPending, settingsOpen, projectName, goal, onSend, onStop, onPick, onImport }: {
+export default function Composer({ draft, onChange, textareaRef, choices, selected, onModel, busy, pending, importing, stopPending, settingsOpen, projectName, goal, projectId, onSend, onStop, onPick, onImport }: {
   draft: ComposerDraft; onChange(patch: Partial<ComposerDraft>): void; textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   choices: ModelChoice[]; selected?: ModelChoice; onModel(choice: ModelChoice): void;
-  busy: boolean; pending: boolean; importing: boolean; stopPending: boolean; settingsOpen: boolean; projectName?: string; goal?: GoalState;
+  busy: boolean; pending: boolean; importing: boolean; stopPending: boolean; settingsOpen: boolean; projectName?: string; goal?: GoalState; projectId?: string;
   onSend(): void; onStop(): void; onPick(folders?: boolean): void; onImport(files: File[]): void;
 }) {
   const [menu, setMenu] = useState<'add' | 'permission'>(); const [goalEditor, setGoalEditor] = useState(false); const [dragging, setDragging] = useState(false);
+  // Continue-style @-file references: typing @ in a project composer opens a
+  // completion menu; the chosen path is inserted as `@path ` text for the agent.
+  const [mention, setMention] = useState<{ start: number; query: string; items: FileEntry[]; index: number } | null>(null);
+  const detectMention = (text: string, caret: number) => projectId ? detectMentionToken(text, caret) : null;
+  useEffect(() => {
+    if (!mention || !projectId) return;
+    let disposed = false;
+    const slash = mention.query.lastIndexOf('/');
+    const directory = slash >= 0 ? mention.query.slice(0, slash) : '';
+    const leaf = slash >= 0 ? mention.query.slice(slash + 1).toLowerCase() : mention.query.toLowerCase();
+    window.localcode.listFiles({ projectId, directory }).then(entries => {
+      if (disposed) return;
+      const items = entries.filter(entry => entry.name.toLowerCase().includes(leaf)).slice(0, 8);
+      setMention(current => current && current.query === mention.query ? { ...current, items, index: Math.min(current.index, Math.max(0, items.length - 1)) } : current);
+    }).catch(() => setMention(null));
+    return () => { disposed = true; };
+  }, [mention?.query, projectId]);
   const addTrigger = useRef<HTMLButtonElement>(null), permissionTrigger = useRef<HTMLButtonElement>(null), addPanel = useRef<HTMLDivElement>(null), permissionPanel = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
   const closeAdd = (focus = false) => { setMenu(undefined); if (focus) addTrigger.current?.focus(); };
@@ -108,7 +130,17 @@ export default function Composer({ draft, onChange, textareaRef, choices, select
   const locked = busy || pending;
   const hasContent = Boolean(draft.text.trim() || draft.attachments.length || draft.goal?.objective);
   const canSend = hasContent && !pending && !importing && Boolean(selected) && !imageUnsupported && !goalUnsupported;
-  useEffect(() => { if (locked || settingsOpen) { setMenu(undefined); setGoalEditor(false); } }, [locked, settingsOpen]);
+  useEffect(() => { if (locked || settingsOpen) { setMenu(undefined); setGoalEditor(false); setMention(null); } }, [locked, settingsOpen]);
+  const applyMention = (entry: FileEntry) => {
+    const textarea = textareaRef.current; if (!mention || !textarea) return;
+    const insert = `@${entry.path}${entry.directory ? '/' : ''} `;
+    const caret = textarea.selectionStart ?? mention.start + mention.query.length + 1;
+    const next = draft.text.slice(0, mention.start) + insert + draft.text.slice(caret);
+    const position = mention.start + insert.length;
+    onChange({ text: next });
+    setMention(null);
+    requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(position, position); });
+  };
   useEffect(() => { if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`; } }, [draft.text]);
   return <>
     <form className={`composer codex-composer ${dragging ? 'is-dragging' : ''}`} onSubmit={event => { event.preventDefault(); if (canSend && !busy) onSend(); }}
@@ -119,10 +151,22 @@ export default function Composer({ draft, onChange, textareaRef, choices, select
       <AttachmentStrip attachments={draft.attachments} disabled={pending} onRemove={id => onChange({ attachments: draft.attachments.filter(item => item.id !== id) })} />
       {importing && <div className="attachment-importing" role="status"><LoaderCircle size={14} className="spin" />{t("正在添加附件…")}</div>}
       <textarea ref={textareaRef} aria-label={t("任务输入")} value={draft.text} rows={2} placeholder={projectName ? t("和 LocalCode 一起工作") : t("随心输入")} disabled={pending}
-        onChange={event => onChange({ text: event.target.value })}
+        onChange={event => { onChange({ text: event.target.value }); const hit = detectMention(event.target.value, event.target.selectionStart ?? event.target.value.length); setMention(hit ? { ...hit, items: [], index: 0 } : null); }}
         onPaste={event => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); onImport(files); } }}
-        onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (canSend && !busy) onSend(); } }} />
-      <div className="composer-toolbar"><div className="composer-options">
+        onKeyDown={event => {
+          if (mention && mention.items.length) {
+            if (event.key === 'ArrowDown') { event.preventDefault(); setMention({ ...mention, index: (mention.index + 1) % mention.items.length }); return; }
+            if (event.key === 'ArrowUp') { event.preventDefault(); setMention({ ...mention, index: (mention.index - 1 + mention.items.length) % mention.items.length }); return; }
+            if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); applyMention(mention.items[mention.index]); return; }
+            if (event.key === 'Escape') { event.preventDefault(); setMention(null); return; }
+          }
+          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (canSend && !busy) onSend(); }
+        }} />
+      {mention && mention.items.length > 0 && <div className="mention-menu" role="listbox" aria-label={t("文件引用建议")}>
+        {mention.items.map((item, index) => <button type="button" role="option" aria-selected={index === mention.index} key={`${item.path}`} className={index === mention.index ? 'active' : ''} onMouseDown={event => { event.preventDefault(); applyMention(item); }}>
+          {item.directory ? <Folder size={15} /> : <FileText size={15} />}<span>{item.name}</span><small>{item.path}</small>
+        </button>)}
+      </div>}      <div className="composer-toolbar"><div className="composer-options">
         <button ref={addTrigger} className="icon-button composer-add" type="button" aria-label={t("添加附件或模式")} title={t("添加")} aria-haspopup="menu" aria-expanded={menu === 'add'} disabled={pending} onClick={() => setMenu(menu === 'add' ? undefined : 'add')}><Plus size={23} strokeWidth={1.8} /></button>
         <button ref={permissionTrigger} className={`permission-trigger ${draft.approvalMode === 'full' ? 'full-access' : ''}`} type="button" aria-label={t("审批模式")} title={t(permission.detail)} aria-haspopup="menu" aria-expanded={menu === 'permission'} disabled={locked} onClick={() => setMenu(menu === 'permission' ? undefined : 'permission')}><permission.Icon size={18} /><span>{t(permission.label)}</span></button>
         {draft.workMode === 'plan' && <><span className="composer-divider" /><button type="button" className="mode-chip" aria-label={t("关闭计划模式")} title="计划模式：先讨论方案，确认后实施" disabled={locked} onClick={() => onChange({ workMode: 'execute' })}><Lightbulb size={18} /><span>{t("计划")}</span><X className="chip-dismiss" size={12} /></button></>}

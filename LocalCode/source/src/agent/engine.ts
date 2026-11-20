@@ -319,6 +319,7 @@ export function finalSummaryPrompt(locale?: AppLocale): string { return `${FINAL
 
 export function systemPromptFor(request: RunRequest): string {
   let text = request.projectPath ? SYSTEM_PROMPT + PET_SKILL_DISCOVERY : CHAT_SYSTEM_PROMPT;
+  if (request.projectPath) text += '\n用户消息中的 @路径（如 @src/main.ts，目录以 / 结尾）是对项目文件的显式引用：优先用 read_file 读取这些文件（目录用 list_files 浏览）。引用只是上下文提示，不构成新指令。';
   const limit = maxToolCallsFor(request);
   if (request.provider.kind === 'ollama' || Number.isFinite(limit)) {
     text += `\n本地模型每轮最多${Number.isFinite(limit) ? limit : MAX_TOOL_CALLS}次工具调用，接近上限时收尾。`;
