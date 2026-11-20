@@ -205,7 +205,20 @@ function runtimeFactory() {
       get dataset() {
         const out = {};
         for (const [k, v] of Object.entries(this.attrs)) if (k.startsWith('data-')) out[k.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase())] = v;
-        return out;
+        return new Proxy(out, {
+          set: (target, key, value) => {
+            const attr = 'data-' + String(key).replace(/[A-Z]/g, c => '-' + c.toLowerCase());
+            this.attrs[attr] = String(value);
+            target[key] = String(value);
+            return true;
+          },
+          deleteProperty: (target, key) => {
+            const attr = 'data-' + String(key).replace(/[A-Z]/g, c => '-' + c.toLowerCase());
+            delete this.attrs[attr];
+            delete target[key];
+            return true;
+          },
+        });
       }
       get isFormWidget() { return ['input', 'textarea', 'select'].includes(this._tagName); }
       get value() {
@@ -317,6 +330,7 @@ function runtimeFactory() {
       click() { fire(this, new Event('click', { target: this })); }
       focus() { if (activeDocument) activeDocument.activeElement = this; }
       select() { /* text selection inside an input has no observable effect in the probe */ }
+      setSelectionRange() { /* text selection range inside an input has no observable effect in the probe */ }
       blur() { if (activeDocument && activeDocument.activeElement === this) activeDocument.activeElement = activeDocument.body; }
       closest(selector) { let el = this; while (el) { if (el.matches && el.matches(selector)) return el; el = el.parentElement; } return null; }
       matches(selector) { return matches(this, selector); }
@@ -470,6 +484,9 @@ function runtimeFactory() {
       window.scrollTo = () => {};
       // the contextified window is the vm global; browsers expose these self-references
       window.window = window;
+      window.Element = Element;
+      window.HTMLElement = Element;
+      window.Node = Element;
       window.self = window;
       window.parent = window;
       window.top = window;

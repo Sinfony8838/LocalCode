@@ -8,8 +8,8 @@ export const benchRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 // A bank is any directory under benchmarks/ that contains a tasks/ folder.
 // Every task.json may set "tier"; the bank name provides the default.
-const TIERS_BY_BANK = { 'five-task': 'L1', interview: 'L2', hard: 'L3' };
-const TIER_ORDER = ['L1', 'L2', 'L3', 'private'];
+const TIERS_BY_BANK = { 'five-task': 'L1', interview: 'L2', hard: 'L3', 'repo-eval': 'L4' };
+const TIER_ORDER = ['L1', 'L2', 'L3', 'L4', 'private'];
 const IGNORED_BANKS = new Set(['lib', 'node_modules']);
 
 export async function listBanks() {

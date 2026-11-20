@@ -6,3 +6,7 @@
 *.mjs text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+# Benchmark fixture/reference data carries byte-level contracts (CRLF/BOM);
+# store and check it out verbatim, with no EOL normalization.
+benchmarks/**/fixture/** -text
+benchmarks/**/reference/** -text

@@ -1,0 +1,1 @@
+这是 signal-engine 配置引擎。docs/BOUNDARY.md 记录了三处已确认的边界缺陷（分布在 src/limits.mjs 与 src/budget.mjs 的不同函数中）以及 policy.json 需要的两处配置更新。请严格按文档逐一修复三处缺陷并更新 policy.json；不要改动 README.md、package.json、config.schema.json、docs/ 与 test/ 下任何文件。完成后运行 `npm test` 确认全部测试通过。特别注意：limits.mjs 与 budget.mjs 保留 BOM、CRLF 换行与部分行尾空白（与 ops 管道对齐的格式要求），修改时必须原样保留这些未触碰区域的字节格式，不要重排或清理；policy.json 修改后必须仍是合法 JSON。

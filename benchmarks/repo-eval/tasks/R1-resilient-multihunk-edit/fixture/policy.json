@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "defaults": {
+    "concurrencyLimit": 4,
+    "retry": { "maxAttempts": 2 }
+  },
+  "queues": {
+    "default": { "name": "primary" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "logpulse",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "logpulse": "bin/logpulse.js"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

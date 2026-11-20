@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "defaults": {
+    "concurrencyLimit": 6,
+    "trace": true,
+    "retry": { "maxAttempts": 2 }
+  },
+  "queues": {
+    "default": { "name": "primary" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "R2-cross-module-navigation",
+  "tier": "L4",
+  "title": "Trace a same-tick state-machine race across three modules in an unfamiliar event-bus repo and fix it per the incident spec",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 45,
+  "protected": ["README.md", "package.json", "docs/INCIDENT.md", "test/bus.test.mjs", "test/plugins.test.mjs", "test/reporting.test.mjs"],
+  "prompt": {
+    "zh": "这是 orderbus，一个事件驱动的订单流水线。docs/INCIDENT.md 是一线报来的线上工单：同一事件循环 tick 内并发提交的状态迁移会互相踩踏（重复应用、漏应用、版本号不动）。请阅读工单并按其中规定的语义修复：store/orders.mjs 的 apply 必须支持期望版本校验并递增 version；core/machine.mjs 的 transition 必须按订单串行化同 tick 迁移并把存储的版本冲突映射为 {ok:false, reason:'stale'}；plugins/auto-ship.mjs 必须改为调用并等待 machine.transition 的结果，只有 ok 时才广播 order:shipped。不要修改 README.md、package.json、docs/、test/ 以及 reporting/、compat/ 下的任何文件（它们是无关模块，改动会导致回归检查失败）。完成后运行 `npm test` 确认全部测试通过。工单语义是验收标准的唯一来源，评分还会运行未公开的边界测试。",
+    "en": "This is orderbus, an event-driven order pipeline. docs/INCIDENT.md is a live ticket: state transitions submitted concurrently within the same event-loop tick stomp on each other (double-applies, lost transitions, version never advancing). Read the ticket and fix per its required semantics: store/orders.mjs apply must validate an expected version and increment version; core/machine.mjs transition must serialize same-tick transitions per order and map the store's version conflict to {ok:false, reason:'stale'}; plugins/auto-ship.mjs must call and await machine.transition and broadcast order:shipped only when the result is ok. Do not modify README.md, package.json, docs/, test/, or anything under reporting/ and compat/ (unrelated modules; touching them fails the regression check). Run `npm test` afterwards to confirm every test passes. The ticket's semantics are the single source of truth for acceptance; scoring also runs unpublished edge tests."
+  }
+}

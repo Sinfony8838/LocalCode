@@ -107,7 +107,7 @@ async function runAgent(out, agent, command, timeoutMin) {
   await fs.writeFile(path.join(root, 'manual.json'), JSON.stringify(manual, null, 2) + '\n');
 }
 
-/** Extract telemetry (toolCalls, inputTokens, outputTokens, durationSeconds) from LocalCode agent-*.jsonl logs into manual.json. */
+/** Extract telemetry (toolCalls, inputTokens, outputTokens, durationSeconds, processQuality) from LocalCode or Claude Code JSONL logs into manual.json. */
 export async function syncLogs(out, agent, logDir) {
   const root = path.join(path.resolve(out), safeLabel(agent));
   const { tasks } = JSON.parse(await fs.readFile(path.join(root, '_baseline.json'), 'utf8'));
@@ -123,35 +123,112 @@ export async function syncLogs(out, agent, logDir) {
     }
   }
   const byWorkspace = new Map(tasks.map(t => { const id = t.id ?? t; return [norm(path.join(root, id)), id]; }));
-  const stats = new Map();
-  const files = (await fs.readdir(resolvedLogDir).catch(() => [])).filter(f => /^agent-.*\.jsonl$/i.test(f)).sort();
+  const runsByTask = new Map();
+  const pushRun = (taskId, runObj) => {
+    if (!runsByTask.has(taskId)) runsByTask.set(taskId, []);
+    runsByTask.get(taskId).push(runObj);
+  };
+
+  const entries = await fs.readdir(resolvedLogDir, { withFileTypes: true }).catch(() => []);
+  const files = entries.filter(e => e.isFile() && /^agent-.*\.jsonl$/i.test(e.name)).map(e => e.name).sort();
   for (const file of files) {
     const lines = (await fs.readFile(path.join(resolvedLogDir, file), 'utf8')).split(/\r?\n/).filter(Boolean);
-    let taskId = null, inputTokens = 0, outputTokens = 0, toolCalls = 0, elapsedMs = 0;
+    let taskId = null, status = 'unknown', inputTokens = 0, outputTokens = 0, toolCalls = 0, elapsedMs = 0, startedAt = '';
+    const toolBreakdown = {};
+    let editErrors = 0, loopWarnings = 0;
     for (const line of lines) {
       let ev; try { ev = JSON.parse(line); } catch { continue; }
       if (ev.type === 'run_start') {
+        startedAt = ev.ts || startedAt;
         const ws = ev.projectPath ? norm(ev.projectPath) : sessionProject.get(ev.sessionId);
         if (ws && byWorkspace.has(ws)) taskId = byWorkspace.get(ws);
+      } else if (ev.type === 'tool_start' && ev.toolName) {
+        toolBreakdown[ev.toolName] = (toolBreakdown[ev.toolName] || 0) + 1;
+      } else if (ev.type === 'tool_end' && ev.isError && (ev.toolName === 'edit_file' || ev.toolName === 'write_file')) {
+        editErrors += 1;
+      } else if (ev.type === 'loop_guard_warning') {
+        loopWarnings += 1;
       } else if (ev.type === 'model_usage' && ev.usage) {
         inputTokens += Number(ev.usage.input ?? ev.usage.inputTokens ?? ev.usage.prompt_tokens ?? 0) || 0;
         outputTokens += Number(ev.usage.output ?? ev.usage.outputTokens ?? ev.usage.completion_tokens ?? 0) || 0;
       } else if (ev.type === 'run_settled') {
+        status = ev.status || 'completed';
         toolCalls += Number(ev.toolCalls ?? 0) || 0;
         elapsedMs += Number(ev.elapsedMs ?? 0) || 0;
       }
     }
     if (taskId) {
-      const prev = stats.get(taskId) ?? { toolCalls: 0, inputTokens: 0, outputTokens: 0, elapsedMs: 0 };
-      stats.set(taskId, { toolCalls: prev.toolCalls + toolCalls, inputTokens: prev.inputTokens + inputTokens, outputTokens: prev.outputTokens + outputTokens, elapsedMs: prev.elapsedMs + elapsedMs });
+      const countedTools = Object.values(toolBreakdown).reduce((a, b) => a + b, 0);
+      pushRun(taskId, { status, toolCalls: toolCalls || countedTools, inputTokens, outputTokens, elapsedMs, toolBreakdown, editErrors, loopWarnings, startedAt });
     }
   }
-  for (const [id, s] of stats) {
+
+  // Also support Claude Code project directories (<logDir>/<encoded-workspace-path>/<session>.jsonl)
+  for (const [wsNorm, taskId] of byWorkspace) {
+    const origWs = path.join(root, taskId);
+    const encoded = origWs.replace(/[:\\/]/g, '-');
+    const projDir = path.join(resolvedLogDir, encoded);
+    const cFiles = (await fs.readdir(projDir).catch(() => [])).filter(f => f.endsWith('.jsonl')).sort();
+    for (const cf of cFiles) {
+      const lines = (await fs.readFile(path.join(projDir, cf), 'utf8')).split(/\r?\n/).filter(Boolean);
+      let firstUserTs = null, lastTs = null, inputTokens = 0, outputTokens = 0, hasError = false;
+      const seenIds = new Set();
+      const seenMessages = new Map();
+      const toolBreakdown = {};
+      for (const line of lines) {
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        const ts = ev.timestamp ? Date.parse(ev.timestamp) : NaN;
+        if (Number.isFinite(ts)) {
+          if (ev.type === 'user' && firstUserTs === null) firstUserTs = ts;
+          lastTs = ts;
+        }
+        if (ev.isApiErrorMessage || ev.error) hasError = true;
+        if (ev.type === 'assistant' && ev.message) {
+          if (ev.message.id && ev.message.usage) {
+            seenMessages.set(ev.message.id, ev.message.usage);
+          }
+          if (Array.isArray(ev.message.content)) {
+            for (const block of ev.message.content) {
+              if (block?.type === 'tool_use' && block.id && !seenIds.has(block.id)) {
+                seenIds.add(block.id);
+                const name = block.name || 'unknown';
+                toolBreakdown[name] = (toolBreakdown[name] || 0) + 1;
+              }
+            }
+          }
+        }
+      }
+      for (const u of seenMessages.values()) {
+        inputTokens += Number(u.input_tokens ?? 0) || 0;
+        outputTokens += Number(u.output_tokens ?? 0) || 0;
+      }
+      const toolCalls = seenIds.size;
+      const elapsedMs = firstUserTs && lastTs && lastTs >= firstUserTs ? lastTs - firstUserTs : 0;
+      const status = !hasError && toolCalls > 0 ? 'completed' : 'failed';
+      pushRun(taskId, { status, toolCalls, inputTokens, outputTokens, elapsedMs, toolBreakdown, editErrors: 0, loopWarnings: 0, startedAt: firstUserTs ? new Date(firstUserTs).toISOString() : '' });
+    }
+  }
+
+  const stats = new Map();
+  for (const [id, runs] of runsByTask) {
+    const completed = runs.filter(r => r.status === 'completed');
+    const chosen = completed.length ? completed[completed.length - 1] : runs[runs.length - 1];
+    stats.set(id, { ...chosen, attempts: runs.length });
     manual[id] ??= Object.fromEntries(MANUAL_FIELDS.map(f => [f, null]));
-    manual[id].toolCalls = s.toolCalls;
-    manual[id].inputTokens = s.inputTokens;
-    manual[id].outputTokens = s.outputTokens;
-    manual[id].durationSeconds = Math.max(1, Math.round(s.elapsedMs / 1000));
+    manual[id].toolCalls = chosen.toolCalls;
+    manual[id].inputTokens = chosen.inputTokens || null;
+    manual[id].outputTokens = chosen.outputTokens || null;
+    manual[id].durationSeconds = Math.max(1, Math.round(chosen.elapsedMs / 1000));
+    const breakdown = Object.entries(chosen.toolBreakdown || {}).map(([k, v]) => `${k}×${v}`).join(', ');
+    if (breakdown && !manual[id].processQuality) {
+      const extras = [];
+      if (chosen.editErrors) extras.push(`editErrors=${chosen.editErrors}`);
+      if (chosen.loopWarnings) extras.push(`loopWarnings=${chosen.loopWarnings}`);
+      manual[id].processQuality = `tools: ${breakdown}${extras.length ? ` (${extras.join(', ')})` : ''}`;
+    }
+    if (runs.length > 1 && !manual[id].notes) {
+      manual[id].notes = `completed on attempt ${runs.length}`;
+    }
   }
   await fs.writeFile(path.join(root, 'manual.json'), JSON.stringify(manual, null, 2) + '\n');
   return Object.fromEntries(stats);
@@ -168,7 +245,14 @@ export async function scoreAgent(root) {
     const dir = path.join(root, id);
     const current = await hashTree(dir);
     const { verify } = await import(pathToFileURL(path.join(task.dir, 'verify.mjs')).href);
-    const outcome = await verify({ task, dir, baseline: baseline[id], current, fixtureDir: path.join(task.dir, 'fixture') });
+    const sandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), `lc-bench-score-${id}-`));
+    let outcome;
+    try {
+      await copyTree(dir, sandboxDir);
+      outcome = await verify({ task, dir: sandboxDir, baseline: baseline[id], current, fixtureDir: path.join(task.dir, 'fixture') });
+    } finally {
+      await fs.rm(sandboxDir, { recursive: true, force: true }).catch(() => {});
+    }
     const before = baseline[id];
     const changed = Object.keys({ ...before, ...current }).filter(f => before[f] !== current[f]).sort();
     const points = outcome.checks.reduce((s, c) => s + c.points, 0), weight = outcome.checks.reduce((s, c) => s + c.weight, 0);

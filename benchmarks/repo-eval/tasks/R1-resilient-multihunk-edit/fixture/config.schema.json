@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "signal-engine policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "defaults", "queues"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["concurrencyLimit", "retry"],
+      "properties": {
+        "concurrencyLimit": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "trace": { "type": "boolean" },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maxAttempts"],
+          "properties": { "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 10 } }
+        }
+      }
+    },
+    "queues": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": { "name": { "type": "string", "minLength": 1 } }
+        }
+      }
+    }
+  }
+}

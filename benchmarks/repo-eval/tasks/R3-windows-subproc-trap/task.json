@@ -1,0 +1,13 @@
+{
+  "id": "R3-windows-subproc-trap",
+  "tier": "L4",
+  "title": "Fix a CLI whose error path blocks on stdin forever and orphan its prompt helper; make CI exits deterministic",
+  "language": "JavaScript (Node.js)",
+  "requires": ["node"],
+  "minutes": 30,
+  "protected": ["README.md", "package.json", "docs/CI-GUIDE.md", "scripts/asker.cjs", "test/stats.test.mjs", "test/rotate.test.mjs"],
+  "prompt": {
+    "zh": "这是 logpulse，一个日志运维 CLI。docs/CI-GUIDE.md 是对外契约，其中标注了本次必须修复的缺陷：`report` 子命令在目标文件已存在且未加 --force 时进入覆盖确认分支，而当前实现在非交互环境（stdin 不是 TTY）会永远等待 stdin 的 data 事件（EOF 时 data 永远不来），CI 由此挂死；交互路径派生的 scripts/asker.cjs 也没有任何看门狗，慢助手会拖死流水线。请按 CI-GUIDE.md 的契约修复：非交互环境下不读 stdin、不派生助手、立即以退出码 2 失败并向 stderr 输出包含 non-interactive 的信息；交互路径用 3 秒看门狗等待 asker，超时按拒绝处理（退出码 3）。scripts/asker.cjs 是受保护的子进程契约（等待一行 stdin 或最多 10 秒后输出 n），不要修改它。stats 与 rotate 子命令行为不得改变；README.md、package.json、docs/ 与 test/ 下文件不要修改（test/report.test.mjs 除外）。完成后运行 `npm test` 确认全部测试通过。",
+    "en": "This is logpulse, a log-ops CLI. docs/CI-GUIDE.md is the external contract, including the defect you must fix: when the target file exists and --force is absent, the `report` sub-command enters an overwrite-confirm branch whose current implementation waits forever for a stdin 'data' event in non-interactive contexts (EOF never produces 'data'), hanging CI; the interactive path spawns scripts/asker.cjs with no watchdog, so a slow helper stalls the pipeline. Fix per the contract in CI-GUIDE.md: in non-interactive contexts do not read stdin and do not spawn the helper — fail immediately with exit code 2 and a stderr message containing 'non-interactive'; on the interactive path wait for asker behind a 3-second watchdog and treat a timeout as declined (exit code 3). scripts/asker.cjs is a protected child-process contract (it waits for one stdin line or prints 'n' after at most 10 seconds) — do not modify it. The stats and rotate sub-commands must keep their behaviour; do not modify README.md, package.json, docs/ or anything under test/ except test/report.test.mjs. Run `npm test` afterwards to confirm every test passes."
+  }
+}
