@@ -10,7 +10,8 @@ import { createAgentSession, createExtensionRuntime, ModelRuntime, SessionManage
 import type { AgentEvent, Approval, RunRequest, WorkerCommand, RunProgress, QuestionItem, QuestionRecord, ThinkingLevel } from '../shared/contracts.js';
 import { killActiveCommands } from '../core/command.js';
 import { killSessionBackgroundProcesses } from '../core/process-manager.js';
-import { readWorkspaceText } from '../core/workspace.js';
+import { readWorkspaceText, walkWorkspaceFiles } from '../core/workspace.js';
+import { resolveResource, resourceWorkspace } from '../core/resources.js';
 import { createWorkspaceTools, type WorkspaceToolContext, type ApprovalRequest } from './tools.js';
 import { DEFAULT_LOCALE, isAppLocale, translate, type AppLocale } from '../shared/i18n.js';
 import { createSkillTool, PET_SKILL_DISCOVERY } from './skills.js';
@@ -90,6 +91,45 @@ export function maxToolCallsFor(request: RunRequest): number {
 function budgetExhaustedMessage(limit: number): string {
   if (limit === MAX_TOOL_CALLS) return BUDGET_EXHAUSTED;
   return `本轮 ${limit} 次工具调用预算已耗尽，未继续执行工具。已收到的回复和文件修改已保留；请根据实际验证结果判断完成情况，需要继续时请发送新消息。`;
+}
+
+/** Aider-style repo map: a small, budgeted structure overview so the agent starts
+ *  oriented instead of spending its first turns on blind list_files probing. */
+export async function projectRepoMap(ctx: WorkspaceContext, options: { budgetChars?: number; maxFiles?: number } = {}): Promise<string> {
+  if (!ctx.projectPath) return '';
+  const budget = options.budgetChars ?? 1500;
+  try {
+    const root = await resolveResource(ctx, '', { directory: true });
+    const files = await walkWorkspaceFiles(resourceWorkspace(ctx, root.root), root.relative, options.maxFiles ?? 400);
+    const rootFiles: string[] = [];
+    const groups = new Map<string, { direct: string[]; subdirs: Set<string>; total: number }>();
+    for (const file of files) {
+      const slash = file.indexOf('/');
+      if (slash < 0) { rootFiles.push(file); continue; }
+      const top = file.slice(0, slash);
+      const rest = file.slice(slash + 1);
+      const group = groups.get(top) ?? { direct: [], subdirs: new Set<string>(), total: 0 };
+      group.total += 1;
+      const nested = rest.indexOf('/');
+      if (nested < 0) group.direct.push(rest);
+      else group.subdirs.add(rest.slice(0, nested));
+      groups.set(top, group);
+    }
+    if (!rootFiles.length && !groups.size) return '';
+    const lines: string[] = [];
+    if (rootFiles.length) lines.push(`(根目录) ${rootFiles.slice(0, 12).join(', ')}${rootFiles.length > 12 ? ` 等 ${rootFiles.length} 个文件` : ''}`);
+    for (const [top, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+      const detail: string[] = [];
+      if (group.direct.length) detail.push(`文件: ${group.direct.slice(0, 8).join(', ')}${group.direct.length > 8 ? ` 等 ${group.direct.length} 个` : ''}`);
+      if (group.subdirs.size) detail.push(`子目录: ${[...group.subdirs].sort().slice(0, 10).map(subdir => `${subdir}/`).join(', ')}${group.subdirs.size > 10 ? ` 等 ${group.subdirs.size} 个` : ''}`);
+      const summary = `${top}/（共 ${group.total} 个文件）${detail.length ? ' — ' + detail.join('; ') : ''}`;
+      if (lines.join('\n').length + summary.length > budget) { lines.push(`（其余目录因预算省略，可用 list_files 查看）`); break; }
+      lines.push(summary);
+    }
+    return `<project-map note="项目结构概览（自动生成，忽略 node_modules/.git/dist 等构建目录）。用 list_files 与 read_file 查看细节。">\n${lines.join('\n')}\n</project-map>`;
+  } catch {
+    return ''; // orientation is best-effort; never block the run
+  }
 }
 
 export function resolveThinkingLevel(request: RunRequest): ThinkingLevel {
@@ -390,9 +430,10 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   const projectConventions = request.loadProjectInstructions && request.projectPath
     ? await loadWorkspaceConventions(request)
     : '';
-  const systemPrompt = projectConventions
-    ? `${systemPromptFor(request)}\n\n${projectConventions}`
-    : systemPromptFor(request);
+  // Small-context local models skip the repo map; orientation is not worth
+  // their prompt budget. Plan runs keep it (they are read-only explorations).
+  const repoMap = lowContext ? '' : await projectRepoMap(request);
+  const systemPrompt = [systemPromptFor(request), projectConventions, repoMap].filter(Boolean).join('\n\n');
 
   const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null,
     allowModelNetwork: false, refreshOnCreate: false, signal });
