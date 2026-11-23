@@ -21,7 +21,13 @@ const checks = [], errors = [], requests = [];
 let app, page, customId;
 const server = http.createServer(async (req, res) => {
   let body = ''; for await (const chunk of req) body += chunk;
-  requests.push(JSON.parse(body));
+  const parsed = JSON.parse(body);
+  if (parsed.stream === false) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: '' } }] }));
+    return;
+  }
+  requests.push(parsed);
   const isTool = requests.length === 1;
   const delta = isTool ? { role: 'assistant', tool_calls: [{ index: 0, id: 'skill-fixture', type: 'function', function: { name: 'load_skill', arguments: JSON.stringify({ name: 'create-desktop-pet', resource: 'instructions' }) } }] } : { role: 'assistant', content: '已加载桌宠定制 Skill。测试使用本地模拟接口，未生成新图片。' };
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -61,9 +67,12 @@ try {
   await settings();
   await page.getByRole('button', { name: '选择自定义旅伴 A', exact: true }).waitFor();
   await page.screenshot({ path: path.join(root, '01-library-light.png') });
+  await page.getByText('当前桌宠：自定义旅伴 A', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '隐藏桌宠', exact: true }).click();
   await page.getByText('当前桌宠：无', { exact: true }).waitFor();
   await until(() => page.evaluate(() => window.localpets.state()), value => !value.preferences.enabled, 'hidden');
   await page.getByRole('button', { name: '显示桌宠', exact: true }).click();
+  await until(() => page.evaluate(() => window.localpets.state()), value => value.preferences.enabled, 'shown');
   await page.getByRole('button', { name: '暂停动画', exact: true }).click();
   await until(() => page.evaluate(() => window.localpets.state()), value => value.preferences.paused, 'paused');
   await page.getByRole('button', { name: '继续动画', exact: true }).click();

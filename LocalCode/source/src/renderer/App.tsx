@@ -36,10 +36,14 @@ const STATUS_LABELS: Record<RunStatus, string> = {
   completed: '已完成', failed: '运行失败', interrupted: '已停止',
 };
 const TOOL_LABELS: Record<string, string> = {
-  read: '读取文件', read_file: '读取文件', write: '写入文件', write_file: '写入文件',
-  edit: '修改文件', edit_file: '修改文件', list: '浏览目录', list_files: '浏览目录',
-  browse: '浏览目录', find: '查找文件', grep: '搜索代码', search: '搜索代码',
-  search_files: '搜索代码', powershell: '运行命令', shell: '运行命令',
+  read: '读取文件', read_file: '读取文件', read_outline: '文件大纲',
+  write: '写入文件', write_file: '写入文件', edit: '修改文件', edit_file: '修改文件',
+  list: '浏览目录', list_files: '浏览目录', browse: '浏览目录',
+  find: '查找文件', grep: '搜索代码', search: '搜索代码', search_files: '搜索代码',
+  explore_codebase: '探索代码库', web_fetch: '读取网页',
+  powershell: '运行命令', shell: '运行命令',
+  start_background_command: '后台运行命令', poll_process_output: '查看后台输出', stop_process: '停止后台命令',
+  ask_question: '确认方案', propose_plan: '提出计划', get_goal: '查看目标', update_goal: '更新目标状态',
   load_skill: '读取桌宠定制 Skill',
 };
 const isBusy = (status?: RunStatus) => status === 'running' || status === 'awaiting_approval' || status === 'awaiting_input';
@@ -357,7 +361,7 @@ export default function App() {
       if (files?.some(file => file.size > 10 * 1024 * 1024)) throw new Error('单个图片不能超过 10 MiB，文本不能超过 2 MiB。');
       if (files && files.reduce((total, file) => total + file.size, base.attachments.reduce((total, file) => total + file.size, 0)) > 50 * 1024 * 1024) throw new Error('每条消息的附件总大小不能超过 50 MiB。');
       const imported = files ? await window.localcode.importAttachments({ draftKey: attachmentDraftKey, files: await Promise.all(files.map(file => new Promise<{ name: string; data: string }>((resolve, reject) => {
-        const reader = new FileReader(); reader.onerror = () => reject(new Error(`无法读取 ${file.name}`));
+        const reader = new FileReader(); reader.onerror = () => reject(new Error(t('无法读取 {name}', { name: file.name })));
         reader.onload = () => resolve({ name: file.name, data: String(reader.result).split(',')[1] || '' }); reader.readAsDataURL(file);
       }))) }) : await window.localcode.pickAttachments({ draftKey: attachmentDraftKey, folders });
       if (!imported.length) return;
@@ -390,8 +394,8 @@ export default function App() {
     event?.preventDefault();
     const prompt = draft.text.trim() || draft.goal?.objective || '';
     if ((!prompt && !draft.attachments.length) || busy || importing || sendLocks.current.has(draftKey) || !provider) return;
-    if (draft.attachments.some(item => item.kind === 'image') && provider.supportsImages !== true) { setError('请先选择支持图片的模型。'); return; }
-    if (draft.goal && provider.kind === 'ollama') { setError('目标模式需要外部模型。'); return; }
+    if (draft.attachments.some(item => item.kind === 'image') && provider.supportsImages !== true) { setError(t('请先选择支持图片的模型。')); return; }
+    if (draft.goal && provider.kind === 'ollama') { setError(t('目标模式需要外部模型。')); return; }
     const navigation = navigationRevision.current;
     const oldDraftKey = draftKey;
     let targetId = activeSessionId;
@@ -693,7 +697,7 @@ function MessageCopy({ message }: { message: ChatMessage }) {
 
 function Message({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
-    if (message.automatic) return <div className="automatic-message"><RefreshCw size={12} /><span>继续推进目标</span></div>;
+    if (message.automatic) return <div className="automatic-message"><RefreshCw size={12} /><span>{t("继续推进目标")}</span></div>;
     if (message.attachments?.length) return <div className="user-message with-attachments"><div className="user-message-content"><AttachmentStrip attachments={message.attachments} />{message.text && <div className="user-message-text">{message.text}</div>}</div></div>;
     return <div className="user-message"><div>{message.text}</div></div>;
   }
@@ -751,8 +755,8 @@ function ToolCard({ tool, thinking }: { tool: ToolRecord; thinking?: MessagePart
   const [expanded, setExpanded] = useState(false);
   const [thoughtOpen, setThoughtOpen] = useState(false);
   const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
-  const summary = String(args.path || args.file_path || args.command || args.pattern || args.directory || '');
-  const command = /powershell|shell|command/i.test(tool.name);
+  const summary = String(args.path || args.file_path || args.command || args.query || args.pattern || args.directory || args.scopePath || args.url || args.question || args.processId || args.status || '');
+  const command = /powershell|shell|command|process/i.test(tool.name);
   const artifact = React.useContext(ArtifactContext);
   const filePath = !command && typeof (args.path || args.file_path) === 'string' ? String(args.path || args.file_path) : '';
   const openable = Boolean(filePath && tool.status === 'completed' && !tool.isError);

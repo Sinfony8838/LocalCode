@@ -92,9 +92,9 @@ export function maxToolCallsFor(request: RunRequest): number {
   return request.provider.kind === 'ollama' ? MAX_TOOL_CALLS : CLOUD_TOOL_CALLS;
 }
 
-function budgetExhaustedMessage(limit: number): string {
-  if (limit === MAX_TOOL_CALLS) return BUDGET_EXHAUSTED;
-  return `本轮 ${limit} 次工具调用预算已耗尽，未继续执行工具。已收到的回复和文件修改已保留；请根据实际验证结果判断完成情况，需要继续时请发送新消息。`;
+function budgetExhaustedMessage(limit: number, locale: AppLocale = DEFAULT_LOCALE): string {
+  if (limit === MAX_TOOL_CALLS) return translate(locale, BUDGET_EXHAUSTED);
+  return translate(locale, '本轮 {limit} 次工具调用预算已耗尽，未继续执行工具。已收到的回复和文件修改已保留；请根据实际验证结果判断完成情况，需要继续时请发送新消息。', { limit });
 }
 
 /** Aider-style repo map: a small, budgeted structure overview so the agent starts
@@ -418,12 +418,18 @@ export function strictTools(tools: ToolDefinition[]): ToolDefinition[] {
   });
 }
 
-export async function createPiSession(request: RunRequest, context: EngineToolContext, signal: AbortSignal): Promise<EngineSession> {
-  const storage = await sessionStorage(request);
-  signal.throwIfAborted();
+async function createConfiguredModelRuntime(
+  request: RunRequest,
+  signal: AbortSignal,
+  transportOptions?: {
+    acquire: (signal: AbortSignal) => Promise<RequestLease>;
+    progress: (progress: RunProgress) => void;
+    telemetry: (type: string, fields?: Record<string, unknown>) => void;
+    failure: (message: string) => void;
+  },
+) {
   const providerId = 'localcode-selected';
   const local = request.provider.kind === 'ollama';
-  const lowContext = request.provider.contextWindow <= 4096;
   const maxTokens = request.provider.maxTokens;
   const thinkingLevel = resolveThinkingLevel(request);
   const thinkingEnabled = thinkingLevel !== 'off';
@@ -432,22 +438,16 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
     ? Math.max(maxTokens, anthropicThinkingBudget + 1024)
     : maxTokens;
 
-  const projectConventions = request.loadProjectInstructions && request.projectPath
-    ? await loadWorkspaceConventions(request)
-    : '';
-  // Small-context local models skip the repo map; orientation is not worth
-  // their prompt budget. Plan runs keep it (they are read-only explorations).
-  const repoMap = lowContext ? '' : await projectRepoMap(request);
-  const systemPrompt = [systemPromptFor(request), projectConventions, repoMap].filter(Boolean).join('\n\n');
-
   const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null,
     allowModelNetwork: false, refreshOnCreate: false, signal });
   let transportError: string | undefined;
-  const transport = !local ? managedTransport({ signal, locale: request.locale,
-    acquire: context.acquireRequest ?? (async () => ({ release() {} })),
-    progress: progress => context.emit({ type: 'progress', runId: request.runId, sessionId: request.sessionId, progress }),
-    telemetry: (type, fields) => context.telemetry?.(type, fields),
-    failure: message => { transportError = message; context.transportFailure?.(message); },
+  const transport = !local && transportOptions ? managedTransport({
+    signal,
+    locale: request.locale,
+    acquire: transportOptions.acquire,
+    progress: transportOptions.progress,
+    telemetry: transportOptions.telemetry,
+    failure: message => { transportError = message; transportOptions.failure(message); },
   }) : undefined;
   if (transport) {
     const original = runtime.streamSimple.bind(runtime);
@@ -478,6 +478,100 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   signal.throwIfAborted();
   const model = runtime.getModel(providerId, request.provider.model);
   if (!model) throw new Error('指定模型未注册；未尝试其他模型。');
+  return { runtime, model, thinkingLevel, transport, getTransportError: () => transportError };
+}
+
+async function runExploreSubagent(
+  request: RunRequest,
+  context: EngineToolContext,
+  input: { question: string; scopePath?: string },
+  parentSignal: AbortSignal,
+): Promise<string> {
+  const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(45_000)]);
+  signal.throwIfAborted();
+  const subRequest: RunRequest = { ...request, thinkingLevel: 'off' };
+  const { runtime, model, transport } = await createConfiguredModelRuntime(subRequest, signal, {
+    acquire: context.acquireRequest ?? (async () => ({ release() {} })),
+    progress: () => {},
+    telemetry: (type, fields) => context.telemetry?.(`explore_${type}`, fields),
+    failure: () => {},
+  });
+  const subTools = strictTools(createExploreSubagentTools({ ...context, workMode: 'plan', exploreCodebase: undefined }));
+  const scopeLabel = input.scopePath || '.';
+  const subPrompt = `你是 LocalCode 的只读代码探索子代理。
+只能使用 list_files、read_outline、search 和 read_file 在最多 ${MAX_EXPLORE_STEPS} 次工具调用内回答问题。
+引用发现时必须给出准确相对路径和 1-based 行号（path:line），不要编造未查看的路径或代码。
+找到答案后立即输出简洁、事实准确的摘要；停止继续搜索。
+
+探索范围：${scopeLabel}
+探索目标：${input.question}`;
+  const cwd = request.projectPath;
+  const settingsManager = SettingsManager.inMemory({
+    compaction: { enabled: false },
+    retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
+    cacheWarming: 'off',
+  });
+  const { session: subSession } = await createAgentSession({
+    cwd, agentDir: path.join(request.dataDir, 'pi'), modelRuntime: runtime, model,
+    thinkingLevel: 'off', sessionManager: SessionManager.inMemory(cwd), settingsManager,
+    resourceLoader: isolatedResourceLoader(request.locale, subPrompt),
+    noTools: 'builtin', tools: subTools.map(tool => tool.name), customTools: subTools,
+  });
+  let finalText = '';
+  let subError = '';
+  const findings: string[] = [];
+  const onAbort = () => { void subSession.abort(); };
+  parentSignal.addEventListener('abort', onAbort, { once: true });
+  const unsubscribe = subSession.subscribe(event => {
+    if (event.type === 'message_end' && event.message.role === 'assistant') {
+      const text = resultText(event.message).trim();
+      if (text) finalText = text;
+      if (event.message.stopReason === 'error') subError ||= event.message.errorMessage || '探索子代理请求失败。';
+    } else if (event.type === 'tool_execution_end' && !event.isError) {
+      const snippet = resultText(event.result).trim().slice(0, 600);
+      if (snippet) findings.push(snippet);
+    }
+  });
+  try {
+    await subSession.prompt(`请在范围 "${scopeLabel}" 内调查并回答：${input.question}`, { expandPromptTemplates: false });
+    await subSession.waitForIdle();
+  } catch (error) {
+    if (parentSignal.aborted) throw error;
+    if (!findings.length && !finalText) {
+      subError ||= error instanceof Error ? error.message : String(error);
+    }
+  } finally {
+    parentSignal.removeEventListener('abort', onAbort);
+    unsubscribe();
+    transport?.close();
+    subSession.dispose();
+  }
+  parentSignal.throwIfAborted();
+  const key = cloudKey(request);
+  const output = finalText || (findings.length ? `已收集的相关代码线索（受步数或超时限制截断）：\n${findings.slice(-4).join('\n\n')}` : '');
+  if (output) return redactValue(output, key);
+  throw new Error(redactValue(subError || '探索子代理未返回有效结果。', key));
+}
+
+export async function createPiSession(request: RunRequest, context: EngineToolContext, signal: AbortSignal): Promise<EngineSession> {
+  const storage = await sessionStorage(request);
+  signal.throwIfAborted();
+  const lowContext = request.provider.contextWindow <= 4096;
+
+  const projectConventions = request.loadProjectInstructions && request.projectPath
+    ? await loadWorkspaceConventions(request)
+    : '';
+  // Small-context local models skip the repo map; orientation is not worth
+  // their prompt budget. Plan runs keep it (they are read-only explorations).
+  const repoMap = lowContext ? '' : await projectRepoMap(request);
+  const systemPrompt = [systemPromptFor(request), projectConventions, repoMap].filter(Boolean).join('\n\n');
+
+  const { runtime, model, thinkingLevel, transport, getTransportError } = await createConfiguredModelRuntime(request, signal, {
+    acquire: context.acquireRequest ?? (async () => ({ release() {} })),
+    progress: progress => context.emit({ type: 'progress', runId: request.runId, sessionId: request.sessionId, progress }),
+    telemetry: (type, fields) => context.telemetry?.(type, fields),
+    failure: message => { context.transportFailure?.(message); },
+  });
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: true, reserveTokens: lowContext ? 1024 : 1536, keepRecentTokens: lowContext ? 1024 : 2048 },
     retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } }, cacheWarming: 'off',
@@ -495,8 +589,11 @@ export async function createPiSession(request: RunRequest, context: EngineToolCo
   if (key) {
     // AgentSession writes messages itself, before main-process/UI filtering can protect JSONL.
     const appendMessage = sessionManager.appendMessage.bind(sessionManager);
-    sessionManager.appendMessage = message => appendMessage(redactValue(message.role === 'assistant' && message.stopReason === 'error' && transportError
-      ? { ...message, errorMessage: transportError } : message, key));
+    sessionManager.appendMessage = message => {
+      const transportError = getTransportError();
+      return appendMessage(redactValue(message.role === 'assistant' && message.stopReason === 'error' && transportError
+        ? { ...message, errorMessage: transportError } : message, key));
+    };
   }
   const { session } = await createAgentSession({
     cwd, agentDir: path.join(request.dataDir, 'pi'), modelRuntime: runtime, model,
@@ -769,7 +866,7 @@ export class AgentEngine {
       case 'tool_execution_start':
         this.send(run, { type: 'progress', progress: { phase: 'tool', since: new Date().toISOString() } });
         this.send(run, { type: 'tool_start', toolCallId: event.toolCallId, name: event.toolName, args: event.args });
-        if (Number.isFinite(limit) && run.toolCalls >= limit) this.fail(run, budgetExhaustedMessage(limit));
+        if (Number.isFinite(limit) && run.toolCalls >= limit) this.fail(run, budgetExhaustedMessage(limit, run.request.locale));
         else ++run.toolCalls;
         break;
       case 'tool_execution_end': {
@@ -781,7 +878,11 @@ export class AgentEngine {
         }
         if (Number.isFinite(limit) && run.toolCalls >= limit && !run.controller.signal.aborted && !run.budgetExhausted) {
           run.budgetExhausted = true;
-          this.send(run, { type: 'notice', message: `本轮 ${limit} 次工具调用预算已耗尽，正在根据已有结果生成最后一条总结；不会再执行工具。` });
+          const locale = run.request.locale ?? DEFAULT_LOCALE;
+          const budgetNotice = limit === MAX_TOOL_CALLS
+            ? translate(locale, '本轮 12 次工具调用预算已耗尽，正在根据已有结果生成最后一条总结；不会再执行工具。')
+            : translate(locale, '本轮 {limit} 次工具调用预算已耗尽，正在根据已有结果生成最后一条总结；不会再执行工具。', { limit });
+          this.send(run, { type: 'notice', message: budgetNotice });
         }
         break;
       }
@@ -847,11 +948,14 @@ export class AgentEngine {
           }
           if (run.summaryRequests === 0) { run.summaryRequests++; return true; }
           // Even a provider ignoring the no-tools request cannot extend the loop.
-          const exhaustedMsg = budgetExhaustedMessage(limit);
+          const exhaustedMsg = budgetExhaustedMessage(limit, run.request.locale);
           this.fail(run, exhaustedMsg);
           throw new Error(exhaustedMsg);
         },
       };
+      context.exploreCodebase = request.projectPath
+        ? (input, signal) => runExploreSubagent(request, context, input, signal ?? run.controller.signal)
+        : undefined;
       const images = await promptImages(request, run.controller.signal);
       run.session = await this.createSession(request, context, run.controller.signal);
       run.controller.signal.throwIfAborted();

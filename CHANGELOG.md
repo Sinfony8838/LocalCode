@@ -2,6 +2,19 @@
 
 All notable changes to LocalCode are recorded here, compiled from the Git history and [docs/RELEASE_REVIEW.md](docs/RELEASE_REVIEW.md). Dates are Asia/Shanghai (UTC+8). Only versions that reached `main` are listed; intermediate candidate versions (for example 0.1.15–0.1.18 on the application-data isolation branch) are described in the release review. Only v0.2.1 and later have a GitHub Release.
 
+## 0.2.12 — 2026-11-23
+
+### Fixed
+- **Subagent, tool tracking, and i18n**: Wired `explore_codebase` inside `AgentEngine` to an isolated, read-only, in-memory `AgentSession` (`MAX_EXPLORE_STEPS = 6`); updated `WORK_TOOLS`, `TOOL_LABELS`, `ToolCard` argument summaries/icons, and `thinkingLevel`/`maxToolCalls` Zod schema & model-settings controls; localized dynamic `{limit}` tool-budget messages and remaining UI strings across all four locales with an automated renderer key check in `tests/localization.test.tsx`.
+- **Auto session titles**: Restricted `generateSessionTitle` to the first completed cloud run of a session still carrying the default title (`新会话`), honored the user's selected locale (`zh-CN` / `en` / `ja` / `ko`), guarded against renaming active or manually renamed sessions, and isolated test fixtures (`provider-fixture.mjs`, `acceptance-artifacts.mjs`, `acceptance-pet-customization.mjs`).
+- **Desktop acceptance & CI unblock**: Fixed clipboard IPC polling in `acceptance-artifacts.mjs`, aligned `acceptance-pet-customization.mjs` with the pet status-row toggle, fixed `acceptance-sessions.mjs` projectless task selection, allowed `.gitkeep`/`.js`/`.cjs` in `scripts/release_scan.py`, and synced `acceptance-home.mjs` / `acceptance-pet-customization.mjs` / `acceptance-model-setup.mjs` / `acceptance-checkpoint.mjs` across source and packaged checks in `.github/workflows/ci.yml`.
+
+## 0.2.11 — 2026-11-21
+
+### Added
+- **Frontier workflow upgrades**: Added JS/TS post-write syntax checking (`src/core/syntax.ts`, borrowed from Cline), compact repository maps (`projectRepoMap`) in system prompts (borrowed from Aider), `@`-file autocomplete suggestions in the composer (`Composer.tsx`, borrowed from Continue), a finite `100`-tool-call runaway guard per turn for cloud models (`CLOUD_TOOL_CALLS`), and OpenCode-style automatic session title generation (`generateSessionTitle`).
+- **L4 benchmark suite**: Added the `benchmarks/repo-eval/` L4 repository-evaluation bank (`R1-resilient-multihunk-edit`, `R2-cross-module-navigation`, `R3-windows-subproc-trap`) and headless runner (`benchmarks/localcode-runner.mjs`).
+
 ## 0.2.10 — 2026-11-03
 
 ### Fixed

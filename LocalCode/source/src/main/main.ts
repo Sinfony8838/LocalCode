@@ -17,7 +17,7 @@ import { inspectLocalModel, localModelProbeSchema } from './local-model-health';
 import { managedOllamaState, startManagedOllama } from './managed-ollama';
 import { providerSchema, testConnection, generateSessionTitle } from './providers';
 import { selectProviderModel } from '../shared/providers';
-import { translate } from '../shared/i18n';
+import { translate, type AppLocale } from '../shared/i18n';
 import { PetController } from './pets';
 import { workspaceBoundary, workspaceContext } from '../core/workspace-context';
 import { listWorkspaceFiles, readWorkspaceFile, getChanges, undoChange, previewChangeCheckpoint, checkpointChange } from '../core/workspace';
@@ -43,7 +43,7 @@ const artifacts = new ArtifactController();
 let window: BrowserWindow | undefined;
 const pets = new PetController(home, __dirname, () => window, () => { window?.restore(); window?.show(); window?.focus(); }, () => store.settings().locale);
 const attachments = new AttachmentStore(dataDir);
-type ActiveRun = { runId: string; sessionId: string; apiKey?: string; child: UtilityProcess; requestGroup: string; goalId?: string; clock?: GoalClock; workMode?: WorkMode; automatic?: boolean; cancelRequested?: boolean; workCalls: number; goalResult?: {status: 'complete' | 'blocked' | 'paused'; reason: string}; title?: { provider: ProviderSecret; prompt: string } };
+type ActiveRun = { runId: string; sessionId: string; apiKey?: string; child: UtilityProcess; requestGroup: string; goalId?: string; clock?: GoalClock; workMode?: WorkMode; automatic?: boolean; cancelRequested?: boolean; workCalls: number; goalResult?: {status: 'complete' | 'blocked' | 'paused'; reason: string}; title?: { runId: string; provider: ProviderSecret; prompt: string; expectedTitle: string; locale: AppLocale } };
 const requestScheduler = new RequestScheduler();
 const runs = new Map<string, ActiveRun>();
 const workers = new Map<string, UtilityProcess>();
@@ -155,6 +155,7 @@ async function startRun(arg: SendInput, automatic?: {goalId: string; revision: n
   try {
     await recovering.get(arg.sessionId); await eventQueue;
     const current = store.session(arg.sessionId);
+    const shouldGenerateTitle = current.title === '新会话' && current.messages.length === 0;
     const mode = arg.workMode ?? current.workMode ?? 'execute';
     const check = () => {
       if (quitting || startup.cancelled) throw new Error('启动已取消。');
@@ -197,7 +198,7 @@ async function startRun(arg: SendInput, automatic?: {goalId: string; revision: n
     active = { runId: session.runId!, sessionId: session.id, apiKey: provider.kind !== 'ollama' ? secret.apiKey : undefined, child,
       requestGroup: new URL(provider.baseUrl).origin + ':' + createHash('sha256').update(secret.apiKey).digest('hex'), goalId: goal?.id,
       workMode: mode, automatic: !!automatic, workCalls: 0,
-      title: provider.kind !== 'ollama' && !automatic ? { provider: secret, prompt } : undefined };
+      title: provider.kind !== 'ollama' && !automatic && shouldGenerateTitle ? { runId: session.runId!, provider: secret, prompt, expectedTitle: session.title, locale } : undefined };
     runs.set(session.id, active);
     if (unavailableFolders.length) emit({type:'notice',runId:active.runId,sessionId:session.id,message:tr('历史文件夹暂不可用，已跳过其读取权限：{names}。需要使用时请重新添加。',{names:[...new Set(unavailableFolders.map(item=>item.name))].join('、')})});
     if (goal && mode !== 'plan') {
@@ -237,11 +238,12 @@ async function processEvent(raw: AgentEvent) {
     // OpenCode-style auto title: after the first completed cloud run, replace the
     // truncated-prompt title with a model-generated one. Best-effort, fire-and-forget.
     const titleSource = active.title;
-    if (event.status === 'completed' && titleSource) {
-      void generateSessionTitle(titleSource.provider, titleSource.prompt).then(title => {
-        if (!title) return;
+    if (event.status === 'completed' && titleSource && !quitting) {
+      void generateSessionTitle(titleSource.provider, titleSource.prompt, 9000, titleSource.locale).then(title => {
+        if (!title || quitting) return;
         const session = store.session(event.sessionId);
-        if (session.status !== 'idle') return;
+        if (['running', 'awaiting_approval', 'awaiting_input'].includes(session.status)) return;
+        if (session.runId !== titleSource.runId || session.title !== titleSource.expectedTitle) return;
         return store.renameSession(event.sessionId, title).then(() => emit({ type: 'state_changed' }));
       }).catch(() => {});
     }

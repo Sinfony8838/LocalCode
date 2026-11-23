@@ -28,6 +28,7 @@ must score ≤ 40 — `self-test` enforces both on every change.
 | L1 冒烟 | `five-task/` | small fixes and builds; catches regressions of the harness and catastrophic agent failures (it once exposed a 0.2.3 command deadlock) | 5 | 5–15 min |
 | L2 笔试 | `interview/` | complete app builds and library implementations from precise specs, scored on weighted feature points and edge cases | 5 | 25–35 min |
 | L3 困难 | `hard/` | unfamiliar mid-size codebases: cross-file features, vague bug reports, behaviour-preserving refactors, performance budgets | 4 | 45–60 min |
+| L4 仓库实战 | `repo-eval/` | multi-hunk mixed-EOL edits, cross-module state-machine races, Windows stdin/child-process traps | 3 | 30–60 min |
 
 L1 checks that nothing is broken. L2 separates competent from sloppy agents.
 L3 is where strong models actually differ: reading unfamiliar code, honouring
@@ -52,6 +53,9 @@ L1 用来确认没坏；L2 区分“会做”与“做得严谨”；L3 才是�
 | H2-scheduler-bug | L3 | 3 root causes behind vague support tickets in `cronlite` | bugs mask each other; existing tests stay green while the bugs exist |
 | H3-refactor-plugins | L3 | refactor `marklet` to a plugin pipeline | byte-identical output, API freeze, hook semantics + ordering |
 | H4-large-report | L3 | exact stats over 150k events in 15 s | pinned percentile/rounding definitions; naive approaches time out |
+| R1-resilient-multihunk-edit | L4 | patch three scattered boundary defects across mixed CRLF/LF files + JSON config | exact line endings, BOM/formatting preservation, multi-file consistency |
+| R2-cross-module-navigation | L4 | trace a same-tick state-machine race across three modules in an event-bus repo | multi-file call graph exploration and invariant preservation |
+| R3-windows-subproc-trap | L4 | fix a CLI blocking forever on stdin error paths and orphan child helpers on Windows | deterministic CI exits without hanging subprocess handles |
 
 ## Run a comparison / 运行对比
 
@@ -169,6 +173,8 @@ benchmarks/
   five-task/         L1 smoke bank (unchanged from the original five tasks)
   interview/         L2 bank  (A1–A5)
   hard/              L3 bank  (H1–H4)
+  repo-eval/         L4 bank  (R1–R3)
+  localcode-runner.mjs headless LocalCode AgentEngine runner over worker IPC
   local-tasks/       private held-out bank (gitignored, optional)
 ```
 

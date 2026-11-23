@@ -3,16 +3,29 @@ import { once } from 'node:events';
 
 // Local-only protocol fixture. Requests and credentials remain in memory.
 export async function providerFixture(secret) {
-  const requests = [], queue = [], errors = [];
+  const requests = [], titleRequests = [], titleReplies = [], queue = [], errors = [];
   const server = http.createServer(async (req, res) => {
     try {
       let raw = ''; for await (const chunk of req) raw += chunk;
       const body = JSON.parse(raw);
       const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
       const kind = pathname.endsWith('/messages') ? 'anthropic' : pathname.endsWith('/responses') ? 'responses' : 'openai';
-      requests.push({ kind, url: req.url, body });
       if ((kind === 'anthropic' ? req.headers['x-api-key'] : req.headers.authorization?.replace(/^Bearer /, '')) !== secret) throw new Error('Wrong authentication header');
       if (kind === 'anthropic' && !req.headers['anthropic-version']) throw new Error('Missing Anthropic version');
+      const isConnectionProbe = body.stream === false && (body.input === 'Reply OK.' || body.messages?.[0]?.content === 'Reply OK.');
+      const isAutoTitle = body.stream === false && !isConnectionProbe;
+      if (isAutoTitle) {
+        titleRequests.push({ kind, url: req.url, body });
+        const titleText = titleReplies.shift() ?? '';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(kind === 'anthropic'
+          ? { type: 'message', content: [{ type: 'text', text: titleText }] }
+          : kind === 'responses'
+            ? { object: 'response', output: [{ type: 'message', content: [{ text: titleText }] }] }
+            : { choices: [{ message: { content: titleText } }] }));
+        return;
+      }
+      requests.push({ kind, url: req.url, body });
       const next = queue.shift() || { text: '模型接口检查通过。' };
       if (next.gate) await next.gate;
       if (next.error) { res.writeHead(next.error, { 'Content-Type': 'application/json', ...next.headers }); res.end(JSON.stringify({ request_id: 'fixture-request-id', error: { code: next.error === 429 ? 'RequestBurstTooFast' : 'authentication_error', message: `Rejected key ${secret}` } })); return; }
@@ -72,5 +85,5 @@ export async function providerFixture(secret) {
     } catch (e) { errors.push(e.message); res.writeHead(500); res.end('fixture failure'); }
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  return { baseUrl: `http://127.0.0.1:${server.address().port}`, requests, queue, errors, close: () => { server.closeAllConnections(); server.close(); } };
+  return { baseUrl: `http://127.0.0.1:${server.address().port}`, requests, titleRequests, titleReplies, queue, errors, close: () => { server.closeAllConnections(); server.close(); } };
 }

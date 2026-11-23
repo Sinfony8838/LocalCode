@@ -1,5 +1,18 @@
 # Open-source release review
 
+## 0.2.5–0.2.12 feature evolution, stabilization, and CI unblock
+
+Compiled from the repository history through `0.2.12`. Versions `0.2.5` through `0.2.11` landed benchmark expansion (`five-task/` L1, `interview/` L2, `hard/` L3, `repo-eval/` L4, and headless `benchmarks/localcode-runner.mjs`), frontier agent tools (`read_outline`, multi-hunk `edit_file`, `explore_codebase` read-only subagent, background command manager, SSRF-guarded `web_fetch`), JS/TS post-write syntax checking, compact repo maps, `@`-file composer completion, project renaming, bare-filename artifact resolution, finite cloud tool budgets (`100`), and first-turn session auto-titling.
+
+Hosted Windows CI runs from `0.2.5` through `0.2.11` failed early in `scripts/release_scan.py` on `unapproved-file-type` for `.gitkeep` and L4 `.js`/`.cjs` fixtures before Electron suites could complete. `0.2.12` restores scanner allowlists, constrains auto-titling to first completed cloud runs with locale awareness, wires `explore_codebase` to an isolated in-memory subagent session inside `AgentEngine`, closes UI/backend i18n gaps, and repairs source & packaged Electron acceptance suites (`artifacts`, `agent-modes`, `task-projects`, `home`, `pet-customization`, `sessions`).
+
+| Check | Result |
+| --- | --- |
+| TypeScript check, Vitest unit/integration suites, setup smoke tests, portable/launcher/benchmark tests | Verified after fixes (`0.2.12`) |
+| Source & packaged Electron acceptance suites (`artifacts`, `model-setup`, `agent-modes`, `task-projects`, `typography`, `checkpoint`, `isolation`, `language`, `home`, `pet-customization`) | Verified with isolated fixtures |
+| Hosted Windows CI on `0.2.12` | Triggered on push to `main` (check Actions) |
+| Clean-Windows, fresh default Ollama, and computer-reboot acceptance | UNRUN; hardware/external gates remain external |
+
 ## 0.2.4 backend localization, benchmark and executor regressions
 
 Prepared on 2026-10-29 (Asia/Shanghai). Merged pull requests [#12](https://github.com/Sinfony8838/LocalCode/pull/12) (five-task benchmark), [#13](https://github.com/Sinfony8838/LocalCode/pull/13) (command-executor regression tests) and [#14](https://github.com/Sinfony8838/LocalCode/pull/14) (backend message localization), each after green hosted Windows CI, plus this version bump.

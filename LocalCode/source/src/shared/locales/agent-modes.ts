@@ -478,5 +478,20 @@ export const agentModeTranslations: Record<string, readonly [string, string, str
     "How should LocalCode actions be approved?",
     "LocalCode の操作をどう承認しますか？",
     "LocalCode 작업을 어떻게 승인할까요?"
+  ],
+  "计划模式：先讨论方案，确认后实施": [
+    "Plan mode: discuss the approach first, then implement after confirmation",
+    "プランモード：先に方針を相談し、確認後に実装します",
+    "계획 모드: 먼저 방안을 논의하고 확인 후 구현합니다"
+  ],
+  "问题 {number}": [
+    "Question {number}",
+    "質問 {number}",
+    "질문 {number}"
+  ],
+  "{label}：自定义回答": [
+    "{label}: Custom answer",
+    "{label}：自由記述",
+    "{label}: 직접 입력"
   ]
 };

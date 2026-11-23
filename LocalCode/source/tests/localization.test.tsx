@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,5 +63,39 @@ describe('application languages', () => {
     for (const name of Object.values(LOCALE_NAMES)) expect(html).toContain(name);
     expect(html).toContain(`value="${locale}" lang="${locale}" selected=""`);
     expect(html).toContain(t('界面与交互语言'));
+  });
+
+  it('registers every renderer t() literal, tool/status label, and dynamic budget template', () => {
+    const rendererDir = path.resolve('src/renderer');
+    const missing: string[] = [];
+    for (const file of fs.readdirSync(rendererDir).filter(name => /\.(ts|tsx)$/.test(name))) {
+      const code = fs.readFileSync(path.join(rendererDir, file), 'utf8');
+      for (const match of code.matchAll(/\bt\(\s*(['"])((?:\\.|(?!\1).)+)\1/g)) {
+        const key = match[2]
+          .replaceAll('\\n', '\n')
+          .replaceAll('\\r', '\r')
+          .replaceAll('\\t', '\t')
+          .replaceAll('\\"', '"')
+          .replaceAll("\\'", "'")
+          .replaceAll('\\\\', '\\');
+        if (key !== ' {label}' && !(key in translations)) {
+          missing.push(`${file}: ${key}`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+
+    for (const locale of APP_LOCALES) {
+      if (locale === 'zh-CN') continue;
+      for (const label of ['文件大纲', '探索代码库', '读取网页', '后台运行命令', '查看后台输出', '停止后台命令', '确认方案', '提出计划', '查看目标', '更新目标状态', '继续推进目标', '文件引用建议', '添加', '思考深度']) {
+        expect(translate(locale, label), `${locale} -> ${label}`).not.toBe(label);
+      }
+      const budgetErr = translate(locale, '本轮 {limit} 次工具调用预算已耗尽，未继续执行工具。已收到的回复和文件修改已保留；请根据实际验证结果判断完成情况，需要继续时请发送新消息。', { limit: 100 });
+      expect(budgetErr).toContain('100');
+      expect(budgetErr).not.toContain('{limit}');
+      const budgetNote = translate(locale, '本轮 {limit} 次工具调用预算已耗尽，正在根据已有结果生成最后一条总结；不会再执行工具。', { limit: 100 });
+      expect(budgetNote).toContain('100');
+      expect(budgetNote).not.toContain('{limit}');
+    }
   });
 });

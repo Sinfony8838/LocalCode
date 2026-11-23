@@ -15,13 +15,20 @@ await fs.mkdir(path.join(project, 'assets'), { recursive: true });
 await fs.writeFile(path.join(project, 'notes.txt'), 'Existing user note\n');
 await fs.writeFile(path.join(project, 'assets/style.css'), 'body { background: rgb(238, 245, 255); color: rgb(23, 67, 101); font-family: sans-serif; padding: 24px; } button { padding: 12px; }');
 await fs.writeFile(path.join(project, 'assets/pixel.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#6b99ce"/></svg>');
-const requests = [], queue = [], fixtureErrors = [], externalRequests = [], gates = [];
+const requests = [], titleRequests = [], queue = [], fixtureErrors = [], externalRequests = [], gates = [];
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url.startsWith('/blocked-probe')) { externalRequests.push(req.url); res.writeHead(200); res.end('unexpected network'); return; }
     let raw = ''; for await (const chunk of req) raw += chunk;
-    const body = JSON.parse(raw); requests.push(body);
+    const body = JSON.parse(raw);
     assert.equal(req.headers.authorization, 'Bearer artifacts-fixture-secret-not-real');
+    if (body.stream === false) {
+      titleRequests.push(body);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: '' } }] }));
+      return;
+    }
+    requests.push(body);
     const next = queue.shift(); assert(next, 'Unexpected model request: fixture exhausted');
     if (next.gate) await next.gate;
     if (res.destroyed) return;
@@ -201,7 +208,7 @@ try {
   assert((await page.locator('.artifact-source').innerText()).includes('最终网页'));
   await page.getByRole('link', { name: '打开网页', exact: true }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: /复制.*路径/ }).click();
-  assert.equal((await app.evaluate(({ clipboard }) => clipboard.readText())).toLowerCase(), path.join(project, 'demo.html').toLowerCase());
+  await poll(async () => (await app.evaluate(({ clipboard }) => clipboard.readText())).toLowerCase() === path.join(project, 'demo.html').toLowerCase(), 'copy full path for demo.html');
   checks.push('File context menu offers preview/source/default app/choose app/reveal/copy; source shows actual file and copy writes validated absolute path');
 
   await app.evaluate(({ shell }) => {
@@ -268,7 +275,7 @@ try {
   await poll(async () => await page.locator('.artifact-source').innerText() === percentHtml, 'literal percent refresh');
   await page.getByRole('link', { name: '百分号文件', exact: true }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '复制完整路径', exact: true }).click();
-  assert.equal((await app.evaluate(({ clipboard }) => clipboard.readText())).toLowerCase(), path.join(project, 'report%20final.html').toLowerCase());
+  await poll(async () => (await app.evaluate(({ clipboard }) => clipboard.readText())).toLowerCase() === path.join(project, 'report%20final.html').toLowerCase(), 'copy full path for report%20final.html');
   await page.getByRole('link', { name: '空格文件', exact: true }).click(); await assertPercentPreview('space file');
   await page.getByRole('button', { name: '打开文件面板', exact: true }).click();
   await page.locator('.inspector-tabs').getByRole('button', { name: '文件', exact: true }).click();

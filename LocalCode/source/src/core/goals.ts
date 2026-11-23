@@ -7,7 +7,11 @@ import type { GoalState, WorkMode } from '../shared/contracts';
  * Persistence and worker admission remain in the authoritative main process.
  */
 export const DEFAULT_GOAL_BUDGET_MS = 2 * 60 * 60 * 1000;
-export const WORK_TOOLS = new Set(['list_files', 'read_file', 'search', 'write_file', 'edit_file', 'powershell', 'read_attachment', 'search_attachments', 'list_attachment_files']);
+export const WORK_TOOLS = new Set([
+  'list_files', 'read_file', 'read_outline', 'search', 'explore_codebase', 'web_fetch',
+  'write_file', 'edit_file', 'powershell', 'start_background_command', 'poll_process_output', 'stop_process',
+  'read_attachment', 'search_attachments', 'list_attachment_files',
+]);
 export class GoalClock {
   private accumulated: number;
   private since?: number;

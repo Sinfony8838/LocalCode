@@ -312,6 +312,77 @@ describe('Step 5: Isolated Read-Only Explore Codebase Subagent', () => {
     expect(text).toContain('feature.ts');
     expect(text).toContain('calculateTotal');
   });
+
+  it('wires explore_codebase in AgentEngine to an in-memory read-only subagent session', async () => {
+    const { projectPath, dataDir } = await createFixture();
+    await fs.writeFile(path.join(projectPath, 'feature.ts'), 'export function calculateTotal(items: number[]) { return items.reduce((a, b) => a + b, 0); }');
+
+    const payloads: Record<string, unknown>[] = [];
+    const server: Server = createServer(async (incoming, response) => {
+      let body = '';
+      for await (const chunk of incoming) body += chunk;
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      payloads.push(parsed);
+      const count = payloads.length;
+      const isExploreTurn = JSON.stringify(parsed.messages).includes('只读代码探索子代理');
+      let delta: Record<string, unknown>;
+      let finishReason = 'stop';
+      if (count === 1) {
+        delta = { role: 'assistant', tool_calls: [{ index: 0, id: 'call-exp', type: 'function', function: { name: 'explore_codebase', arguments: JSON.stringify({ question: 'Where is calculateTotal defined?' }) } }] };
+        finishReason = 'tool_calls';
+      } else if (isExploreTurn && count === 2) {
+        delta = { role: 'assistant', tool_calls: [{ index: 0, id: 'sub-search', type: 'function', function: { name: 'search', arguments: JSON.stringify({ query: 'calculateTotal' }) } }] };
+        finishReason = 'tool_calls';
+      } else if (isExploreTurn) {
+        delta = { role: 'assistant', content: 'calculateTotal 定义在 feature.ts:1。' };
+      } else {
+        delta = { role: 'assistant', content: '已通过探索子代理定位到 feature.ts:1。' };
+      }
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      response.write(`data: ${JSON.stringify({ id: `exp-${count}`, object: 'chat.completion.chunk', model: 'mock-model', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: `exp-${count}`, object: 'chat.completion.chunk', model: 'mock-model', choices: [{ index: 0, delta: {}, finish_reason: finishReason }] })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    if (!addr || typeof addr === 'string') throw new Error('Failed to bind server');
+
+    const req: RunRequest = {
+      type: 'run',
+      runId: 'explore-wire-run',
+      sessionId: 'explore-wire-session',
+      ...workspaceContext(projectPath, dataDir),
+      prompt: '查找 calculateTotal 在哪里定义',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+        kind: 'openai',
+        baseUrl: `http://127.0.0.1:${addr.port}/v1`,
+        model: 'mock-model',
+        contextWindow: 16384,
+        maxTokens: 2048,
+        hasKey: true,
+        apiKey: 'explore-secret-key',
+      },
+    };
+    const events: AgentEvent[] = [];
+    const engine = new AgentEngine((e) => events.push(e));
+    try {
+      await engine.handle(req);
+      expect(events.at(-1)).toMatchObject({ type: 'settled', status: 'completed' });
+      expect(payloads).toHaveLength(4);
+      const subTools = (payloads[1].tools as { function: { name: string } }[]).map((t) => t.function.name).sort();
+      expect(subTools).toEqual(['list_files', 'read_file', 'read_outline', 'search']);
+      const toolResult = events.find((e) => e.type === 'tool_result' && !e.isError);
+      expect(toolResult).toMatchObject({ result: expect.stringContaining('feature.ts:1') });
+      const sessionFiles = await fs.readdir(path.join(dataDir, 'sessions', 'explore-wire-session'));
+      expect(sessionFiles.filter((f) => f.endsWith('.jsonl'))).toHaveLength(1);
+    } finally {
+      await engine.shutdown();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
 });
 
 describe('Step 6: Background Process Manager and SSRF-Protected Web Fetch', () => {

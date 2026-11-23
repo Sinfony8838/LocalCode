@@ -43,4 +43,21 @@ describe('generateSessionTitle', () => {
     const body = JSON.parse(captured) as { messages: { content: string }[] };
     expect(body.messages[0].content.length).toBeLessThanOrEqual(570);
   });
+
+  it('localizes title prompts across en, ja, and ko and extracts Responses output text', async () => {
+    const prompts: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body: string }) => {
+      const parsed = JSON.parse(init.body) as { input?: string; messages?: { content: string }[] };
+      prompts.push(parsed.input ?? parsed.messages?.[0]?.content ?? '');
+      return jsonResponse({ output: [{ type: 'message', content: [{ text: 'Refactor session title generator cleanly!' }] }] });
+    }));
+    const enTitle = await generateSessionTitle({ ...cloud, kind: 'responses' }, 'Please refactor the session title logic', 9000, 'en');
+    expect(enTitle).toBe('Refactor session title generator cleanly');
+    expect(prompts[0]).toContain('Create a short title');
+
+    await generateSessionTitle(cloud, 'テスト', 9000, 'ja');
+    await generateSessionTitle(cloud, '테스트', 9000, 'ko');
+    expect(prompts[1]).toContain('タイトル');
+    expect(prompts[2]).toContain('제목');
+  });
 });

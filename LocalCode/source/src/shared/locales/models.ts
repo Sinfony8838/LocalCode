@@ -78,4 +78,10 @@ export const modelTranslations: Record<string, readonly [string, string, string]
   'Ollama 已连接，但所选模型尚未安装。请选择下方已安装模型，或自行安装所需模型后刷新。保存和检查均不会下载模型。': ['Connected to Ollama, but the selected model is not installed. Choose an installed model below, or install the model yourself and refresh. Saving and checking do not download models.', 'Ollama に接続しましたが、選択したモデルは未インストールです。下のインストール済みモデルを選ぶか、必要なモデルをインストールして更新してください。保存や確認ではモデルをダウンロードしません。', 'Ollama에 연결했지만 선택한 모델이 설치되지 않았습니다. 아래에서 설치된 모델을 선택하거나 필요한 모델을 직접 설치한 후 새로고침하세요. 저장과 확인은 모델을 다운로드하지 않습니다.'],
   '模型已安装，当前以 CPU 运行，响应可能较慢。可尝试更小模型或更低上下文；本检查不验证工具调用能力。': ['The model is installed and currently running on CPU, which may be slow. Try a smaller model or context window. This check does not verify tool-calling capability.', 'モデルはインストール済みで、現在 CPU で動作しているため、応答が遅くなる場合があります。より小さなモデルや短いコンテキストをお試しください。この確認ではツール呼び出し能力は検証しません。', '모델이 설치되어 있으며 현재 CPU에서 실행 중이므로 응답이 느릴 수 있습니다. 더 작은 모델이나 컨텍스트를 사용해 보세요. 이 확인은 도구 호출 능력을 검증하지 않습니다.'],
   '所选模型已安装。本检查仅读取服务信息，不加载模型；实际性能和工具调用需在任务中验证。': ['The selected model is installed. This check only reads service information and does not load the model. Verify actual performance and tool calls in a task.', '選択したモデルはインストール済みです。この確認はサービス情報を読み取るだけで、モデルは読み込みません。実際の性能とツール呼び出しはタスクで検証してください。', '선택한 모델이 설치되어 있습니다. 이 확인은 서비스 정보만 읽으며 모델을 불러오지 않습니다. 실제 성능과 도구 호출은 작업에서 검증하세요.'],
+  '思考深度': ['Thinking level', '思考レベル', '사고 깊이'],
+  '思考深度 {number}': ['Thinking level {number}', '思考レベル {number}', '사고 깊이 {number}'],
+  '关闭（默认）': ['Off (default)', 'オフ（既定）', '끄기(기본값)'],
+  '低': ['Low', '低', '낮음'],
+  '中': ['Medium', '中', '보통'],
+  '高': ['High', '高', '높음'],
 };

@@ -22,7 +22,7 @@ async function poll(fn, label, timeout = 30000) {
 }
 const state = () => page.evaluate(() => window.localcode.bootstrap());
 async function session(id, status) { return poll(async () => { const s = (await state()).sessions.find(s => s.id === id); return (!status || s.status === status) && s; }, `session ${id} ${status || ''}`); }
-async function select(id) { const s = await session(id); await page.locator('.session-button').filter({ hasText: s.title }).click(); }
+async function select(id) { await page.locator(`[data-session-id="${id}"]`).first().locator('button').first().click(); }
 async function sendUI(name, prompt) {
   await page.getByRole('button', { name: '选择模型', exact: true }).click();
   await page.getByRole('option', { name: `Fixture ${name} · model-${name}`, exact: true }).click();
@@ -53,6 +53,8 @@ try {
   assert(await page.getByRole('button', { name: '发送任务', exact: true }).isEnabled());
   await page.screenshot({ path: path.join(root, '01-idle-session-while-a-running.png') });
   checks.push('new idle session shows enabled send button while A runs; no global stop button');
+  await page.getByRole('button', { name: '选择工作项目', exact: true }).click();
+  await page.getByRole('option', { name: 'project', exact: true }).click();
   fixtures[1].queue.push({ tool: { name: 'powershell', args: { command: "[IO.File]::WriteAllText((Join-Path (Get-Location) 'began.txt'),'began'); Start-Sleep -Seconds 12; [IO.File]::WriteAllText((Join-Path (Get-Location) 'done.txt'),'done')" } } }, { text: 'SESSION_B_FINISHED' });
   await sendUI('B', 'SESSION_B_ONLY');
   b = await poll(async () => (await state()).sessions.find(s => s.title === 'SESSION_B_ONLY' && s.status === 'awaiting_approval'), 'B approval');

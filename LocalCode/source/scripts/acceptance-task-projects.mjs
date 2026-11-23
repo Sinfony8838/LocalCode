@@ -135,6 +135,7 @@ try {
   assert.equal((await state()).sessions.length, 2);
   checks.push('searchable project picker supports keyboard selection and fits a narrow dark window at 20px without creating a task');
   assert.equal(fixture.queue.length, 0); assert.deepEqual(fixture.errors, []);
+  await poll(() => fixture.titleRequests.length === 2, 'first-turn-only auto-title requests');
 } catch (error) { errors.push(error.stack); await page?.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {}); }
 finally { release?.(); await app?.close().catch(error => errors.push(error.stack)); await fixture.close(); }
 const report = { passed: errors.length === 0, executable: executable ? path.resolve(executable) : 'source', root, checks, errors, modelRequests: fixture.requests.length, paidModelRequests: 0, productionDataUsedForTests: false };

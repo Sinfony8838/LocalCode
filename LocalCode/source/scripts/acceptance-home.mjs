@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import { providerFixture } from './provider-fixture.mjs';
 
 // Exercise actual navigation and persistence using an isolated desktop profile.
-const executable = process.argv[2];
-assert(executable, 'Pass the packaged LocalCode.exe to verify');
+const executableArg = process.argv.slice(2).find(arg => !arg.startsWith('--'));
+const executable = executableArg ? path.resolve(executableArg) : undefined;
 const expectBug = process.argv.includes('--expect-bug');
 const root = path.resolve(`../evidence/home-navigation-${Date.now()}`);
 const project = path.join(root, 'project');
@@ -30,7 +30,8 @@ async function poll(fn, label) {
   throw new Error(`Timed out: ${label}`);
 }
 async function launch() {
-  app = await electron.launch({ executablePath: path.resolve(executable), args: [], env, timeout: 60000 });
+  await fs.mkdir(env.TEMP || path.resolve('../cache'), { recursive: true });
+  app = await electron.launch({ executablePath: executable || path.resolve('node_modules/electron/dist/electron.exe'), args: executable ? [] : [process.cwd()], env: { ...env, TEMP: path.resolve('../cache'), TMP: path.resolve('../cache') }, timeout: 60000 });
   page = await poll(() => app.windows().find(p => /\/index\.html$/.test(p.url())), 'main window');
   page.on('pageerror', error => errors.push(error.stack));
   await input().waitFor();
@@ -142,6 +143,13 @@ try {
     await clickHome(); assert.equal(await page.locator('.inspector').count(), 0);
     await select(running.title); assert.equal(await input().inputValue(), '继续已有会话的草稿');
     await clickHome();
+    await poll(() => fixture.titleRequests.length === 1, 'first-turn auto-title request');
+    fixture.titleReplies.push('精简首页标题');
+    fixture.queue.push({ text: '已总结标题。' });
+    await input().fill('请帮我排查为什么打开主页后标题栏一直显示原始提示词而不是总结标题');
+    await page.getByRole('button', { name: '发送任务', exact: true }).click();
+    await poll(async () => (await state()).sessions.find(s => s.title === '精简首页标题' && s.status === 'completed'), 'auto-title renamed session');
+    await poll(async () => (await disk()).sessions.some(s => s.title === '精简首页标题'), 'persisted auto-title');
     await page.screenshot({ path: path.join(root, 'fixed-home.png') });
     const persisted = (await disk()).sessions;
     await app.close(); app = undefined;
@@ -149,8 +157,9 @@ try {
     assert.deepEqual((await state()).sessions, persisted);
     await clickHome(3); await isHome();
     assert.deepEqual((await disk()).sessions, persisted);
-    assert.equal(fixture.requests.length, 1);
-    checks.push('history and completed messages survive restart; home still adds no sessions');
+    assert.equal(fixture.requests.length, 2);
+    assert.equal(fixture.titleRequests.length, 2);
+    checks.push('history, auto-generated title, and completed messages survive restart; home still adds no sessions');
   }
 } catch (error) { errors.push(error.stack); }
 finally {
@@ -160,7 +169,7 @@ finally {
   await fixture.close();
 }
 errors.push(...fixture.errors);
-const result = { passed: errors.length === 0, expectBug, executable: path.resolve(executable), root, checks, errors, fixtureRequests: fixture.requests.length, paidModelRequests: 0, productionDataUsedForTests: false };
+const result = { passed: errors.length === 0, expectBug, executable: executable || 'source', root, checks, errors, fixtureRequests: fixture.requests.length, titleRequests: fixture.titleRequests.length, paidModelRequests: 0, productionDataUsedForTests: false };
 await fs.writeFile(path.join(root, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
 if (!result.passed) process.exitCode = 1;

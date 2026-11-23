@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { localOllamaUrl, MANAGED_OLLAMA_URL } from '../shared/providers';
 import type { ProviderSecret } from '../shared/contracts';
+import type { AppLocale } from '../shared/i18n';
 
-const modelSchema = z.object({ id: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072), enabled: z.boolean(), supportsImages: z.boolean().optional() }).strict()
+const thinkingLevelSchema = z.enum(['off', 'low', 'medium', 'high']);
+const modelSchema = z.object({ id: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072), enabled: z.boolean(), supportsImages: z.boolean().optional(), thinkingLevel: thinkingLevelSchema.optional() }).strict()
   .refine(v => v.maxTokens + 1536 < v.contextWindow, '上下文需留出至少 1536 tokens 供压缩和输入使用');
 export const providerSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/), name: z.string().trim().min(1).max(80), kind: z.enum(['ollama', 'openai', 'anthropic', 'responses']),
@@ -11,7 +13,7 @@ export const providerSchema = z.object({
     catch { return false; }
   }, 'Base URL 仅支持不含凭证、查询参数的 HTTP/HTTPS 地址'),
   model: z.string().trim().min(1).max(200), contextWindow: z.number().int().min(2048).max(2097152), maxTokens: z.number().int().min(128).max(131072),
-  ollamaMode: z.enum(['managed', 'existing']).optional(), supportsImages: z.boolean().optional(), enabled: z.boolean().optional(), models: z.array(modelSchema).min(1).max(100).optional(), apiKey: z.string().trim().min(6).max(4096).optional(),
+  ollamaMode: z.enum(['managed', 'existing']).optional(), supportsImages: z.boolean().optional(), enabled: z.boolean().optional(), thinkingLevel: thinkingLevelSchema.optional(), maxToolCalls: z.number().int().min(1).max(1000).optional(), models: z.array(modelSchema).min(1).max(100).optional(), apiKey: z.string().trim().min(6).max(4096).optional(),
 }).strict().superRefine((v, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
   if (v.kind === 'ollama') {
@@ -73,12 +75,20 @@ export async function testConnection(provider: ProviderSecret): Promise<{ messag
   }
 }
 
+const TITLE_INSTRUCTIONS: Record<AppLocale, string> = {
+  'zh-CN': '为下面的用户请求起一个简短标题：不超过 16 个字，概括任务主题。直接输出标题文本本身，不要引号、句号或任何解释。\n\n用户请求：',
+  en: 'Create a short title summarizing the user request below (max 6 words). Output only the plain title text without quotes, trailing punctuation, or explanation.\n\nUser request:',
+  ja: '次のユーザー依頼の要点を16文字以内の短いタイトルにまとめてください。タイトル本文のみを出力し、引用符・句点・説明は付けないでください。\n\nユーザー依頼：',
+  ko: '아래 사용자 요청의 주제를 16자 이내의 짧은 제목으로 요약하세요. 따옴표, 마침표, 설명 없이 제목만 출력하세요.\n\n사용자 요청:',
+};
+
 /** OpenCode-style auto session title: one small request, best-effort, never throws. */
-export async function generateSessionTitle(provider: ProviderSecret, prompt: string, timeoutMs = 9000): Promise<string | null> {
+export async function generateSessionTitle(provider: ProviderSecret, prompt: string, timeoutMs = 9000, locale: AppLocale = 'zh-CN'): Promise<string | null> {
   const anthropic = provider.kind === 'anthropic';
   const responses = provider.kind === 'responses';
   const endpoint = anthropic ? '/v1/messages' : responses ? '/responses' : '/chat/completions';
-  const instruction = '为下面的用户请求起一个简短标题：不超过 16 个字，概括任务主题。直接输出标题文本本身，不要引号、句号或任何解释。\n\n用户请求：' + prompt.slice(0, 500);
+  const instruction = (TITLE_INSTRUCTIONS[locale] ?? TITLE_INSTRUCTIONS['zh-CN']) + prompt.slice(0, 500);
+  const maxLength = locale === 'en' ? 40 : 24;
   try {
     const response = await fetch(provider.baseUrl.replace(/\/$/, '') + endpoint, {
       method: 'POST', signal: AbortSignal.timeout(timeoutMs), redirect: 'error',
@@ -98,7 +108,7 @@ export async function generateSessionTitle(provider: ProviderSecret, prompt: str
     const raw = anthropic ? (Array.isArray(data.content) ? data.content.filter((part: any) => part?.type === 'text').map((part: any) => part.text ?? '').join(' ') : '')
       : responses ? (Array.isArray(data.output) ? data.output.filter((part: any) => part?.type === 'message').flatMap((part: any) => Array.isArray(part.content) ? part.content : []).map((part: any) => part?.text ?? '').join(' ') : '')
         : (data.choices?.[0]?.message?.content ?? '');
-    const cleaned = String(raw).replace(/["'`*#「」『』\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[.。!！?？]+$/, '').slice(0, 24).trim();
+    const cleaned = String(raw).replace(/["'`*#「」『』\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[.。!！?？]+$/, '').slice(0, maxLength).trim();
     return cleaned.length >= 2 ? cleaned : null;
   } catch {
     return null; // titling is cosmetic; never surface failures to the user

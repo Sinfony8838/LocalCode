@@ -8,8 +8,8 @@ import subprocess
 import sys
 
 BLOCKED_DIRS = {'node_modules', 'dist', 'data', 'cache', 'logs', 'evidence', 'app', 'models', 'runtime', 'profile', 'temp', 'downloads', 'tools', '.aws', '.ssh', '.codex', '.agents', 'test-results', 'playwright-report'}
-ALLOWED_SUFFIXES = {'.md', '.py', '.ts', '.tsx', '.mjs', '.json', '.css', '.html', '.ps1', '.cmd', '.yml', '.yaml'}
-ALLOWED_NAMES = {'LICENSE', '.gitignore', '.gitattributes', '.npmrc'}
+ALLOWED_SUFFIXES = {'.md', '.py', '.ts', '.tsx', '.js', '.cjs', '.mjs', '.json', '.css', '.html', '.ps1', '.cmd', '.yml', '.yaml'}
+ALLOWED_NAMES = {'LICENSE', '.gitignore', '.gitattributes', '.npmrc', '.gitkeep'}
 # Only these reviewed branding bytes may bypass the file-type/NUL checks.
 # Directory, Git mode, size and credential rules still apply to every asset.
 ALLOWED_BINARY_ASSETS = {
@@ -77,6 +77,11 @@ def self_test():
     assert inspect('src/test.ts', '100644', b'stored-ciphertext', [b'stored-ciphertext'])
     assert not inspect('src/test.ts', '100644', b'const apiKey = input.apiKey;')
     assert not inspect('tests/mock.ts', '100644', b'apiKey: "provider-fixture-secret-NOT-A-REAL-KEY"')
+    assert not inspect('benchmarks/local-tasks/tasks/.gitkeep', '100644', b'')
+    assert not inspect('benchmarks/repo-eval/tasks/sample/fixture/bin/tool.js', '100644', b'console.log(1);\n')
+    assert not inspect('benchmarks/repo-eval/tasks/sample/fixture/scripts/asker.cjs', '100644', b'module.exports = 1;\n')
+    assert 'unapproved-file-type' in inspect('benchmarks/sample/app.exe', '100644', b'MZ')
+    assert 'unapproved-file-type' in inspect('.env.local', '100644', b'FOO=bar')
     root = Path(__file__).resolve().parent.parent
     for name, digest in ALLOWED_BINARY_ASSETS.items():
         content = (root / name).read_bytes()
