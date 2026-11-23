@@ -28,7 +28,13 @@ ALLOWED_REFERENCE_SOURCES = {
     "LocalCode/source/third_party/codex/NOTICE": "8b6db9c66bc81dba23ba1e4cd255bf9f2a1f799f532d97c1ef310f5e379407d7",
     "LocalCode/source/third_party/opencode/LICENSE": "d1a549bbb600032e0184f9e874d4d96cd951f26dcce6dbf1e1313c819a231dac",
     "LocalCode/source/third_party/opencode/packages/core/src/util/wildcard.ts": "965e902e2a3e01fa71a8847a37b6a86ca1301a27d5830e33ab67cd2a4473d3b2",
-    "LocalCode/source/third_party/opencode/packages/opencode/src/permission/index.ts": "b152062772126727ec18cffb52702c4029ea8367a4fb31095798b6e3e61a4857"
+    "LocalCode/source/third_party/opencode/packages/opencode/src/permission/index.ts": "b152062772126727ec18cffb52702c4029ea8367a4fb31095798b6e3e61a4857",
+    "benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/a.log": "255d2c9997b40b465d94ed2d12264cbf2418d1a7f3912e0f893d3ec586a4b36a",
+    "benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/b.log": "efbe950ddf578c4e703a6133039a86c11815289a65e6112dd372724f5922e8fc",
+    "benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/c.log": "d806e241e020586338c01b9f4cebb2889d64b5f49f8658d3f2c3f0c6764a286c",
+    "benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/d.log": "e548b8dec56fa0e4976be641276b71786fe63603480cce5429ea80b4baa709c7",
+    "benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/e.log": "30f18448afffba294659abd16969729c41b6de2e9dbe999784c37134bf4b3a6c",
+    "benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/samples/sample.log": "927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9"
 }
 PATTERNS = {
     'private-key': re.compile(rb'-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----'),
@@ -82,6 +88,9 @@ def self_test():
     assert not inspect('benchmarks/repo-eval/tasks/sample/fixture/scripts/asker.cjs', '100644', b'module.exports = 1;\n')
     assert 'unapproved-file-type' in inspect('benchmarks/sample/app.exe', '100644', b'MZ')
     assert 'unapproved-file-type' in inspect('.env.local', '100644', b'FOO=bar')
+    assert not inspect('benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/a.log', '100644', b'log line 1 in a.log\nlog line 2 in a.log\n')
+    assert 'runtime-or-private-directory' in inspect('other/logs/a.log', '100644', b'log line 1 in a.log\nlog line 2 in a.log\n')
+    assert 'unapproved-file-type' in inspect('benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/a.log', '100644', b'tampered')
     root = Path(__file__).resolve().parent.parent
     for name, digest in ALLOWED_BINARY_ASSETS.items():
         content = (root / name).read_bytes()

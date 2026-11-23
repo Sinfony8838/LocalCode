@@ -46,3 +46,8 @@ LocalCode/source/src/renderer/public/pets/
 # Private held-out benchmark tasks (never published)
 benchmarks/local-tasks/tasks/*
 !benchmarks/local-tasks/tasks/.gitkeep
+
+# Benchmark R3 fixture log data (synthetic test inputs only)
+!benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/
+!benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/logs/*.log
+!benchmarks/repo-eval/tasks/R3-windows-subproc-trap/fixture/samples/sample.log
