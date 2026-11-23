@@ -8,7 +8,7 @@
 
 本仓库公开完整应用架构、源码、测试、依赖锁及一键部署脚本。
 
-**更新内容：** 0.2.11 新增 JS/TS 写后语法检查、系统提示中的紧凑项目结构地图（repo map）、输入框 `@` 文件补全、云端模型默认 `100` 次/轮工具上限保护、首轮云端对话自动生成标题以及 L4 `repo-eval/` 实战评测题库（接续 0.2.5–0.2.10 的分层题库、亚秒级思考合并、探索子代理与结构大纲工具、项目重命名及裸文件名产物链接解析）。完整历史见[更新日志](CHANGELOG.md)；另见[使用说明](LocalCode/source/docs/AGENT_MODES.md)和[开源实现来源](LocalCode/source/THIRD_PARTY_NOTICES.md)。
+**更新内容：** 0.2.12 将 `explore_codebase` 接入独立只读 `SessionManager.inMemory` 子代理会话，将自动标题限制为默认标题（`新会话`）首轮云端对话并支持 4 语种，补全界面与 `{limit}` 预算多语言并加强覆盖测试，修复多套 Electron 验收并恢复 Windows CI 全绿。0.2.11 新增 JS/TS 写后语法检查、系统提示中的紧凑项目结构地图（repo map）、输入框 `@` 文件补全、云端模型默认 `100` 次/轮工具上限保护，以及 L4 `repo-eval/` 实战评测题库（接续 0.2.5–0.2.10 的分层题库、亚秒级思考合并、大纲/后台进程/安全网页获取工具、项目重命名及裸文件名产物链接解析）。完整历史见[更新日志](CHANGELOG.md)；另见[使用说明](LocalCode/source/docs/AGENT_MODES.md)和[开源实现来源](LocalCode/source/THIRD_PARTY_NOTICES.md)。
 
 “设置 → 桌宠”提供预览与自定义宠物库。通过专用 `create-desktop-pet` Skill，可在项目中使用所选聊天模型组织制作流程，并调用独立图片 API 生成、校验和预览图集，再导入为自己的桌宠。公开构建不附带第三方角色素材。详见[自定义桌宠](docs/CUSTOM_PETS.md#中文使用说明)。
 
@@ -16,7 +16,7 @@
 
 聊天排版采用系统无衬线字体，默认正文 14 px、行高 24 px、段间距 12 px；可在“设置 → 外观”调整字号。停止状态和用时合并为一行，成功运行的用时显示在最终回复前；文件卡片先显示三个文件，其余可展开。固定统计范围说明不再占用聊天空间，实际统计异常仍会显示。
 
-> **Windows 下载：** [LocalCode 0.2.4 — Windows x64 便携包](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.4)。校验 `SHA256SUMS.txt` 后完整解压，双击 `Start.cmd`。更新前备份旧目录，并将新版解压到新目录，详见下文。
+> **Windows 下载：** [LocalCode 0.2.12 — Windows x64 便携包](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.12)。校验 `SHA256SUMS.txt` 后完整解压，双击 `Start.cmd`。更新前备份旧目录，并将新版解压到新目录，详见下文。
 
 ## 界面与回复语言
 
@@ -43,7 +43,7 @@
 | 下载的是什么 | 怎么辨认 | 第一步 |
 | --- | --- | --- |
 | GitHub **Code → Download ZIP** 或自动生成的 **Source code** 源码压缩包 | 有 `LocalCode/source/package.json`，没有已打包桌面 | 运行 `Setup.cmd`；使用云端 API 或已有 Ollama 时选 **2 — 仅桌面** |
-| GitHub Release 的 **Windows x64 便携包** | `LocalCode-0.2.4-windows-x64.zip` 内有 `READ-ME-FIRST.txt` 和 `LocalCode/app/current.txt` | 完整解压，再运行 `Start.cmd`；Actions 产物需额外解压外层 ZIP |
+| GitHub Release 的 **Windows x64 便携包** | `LocalCode-0.2.12-windows-x64.zip` 内有 `READ-ME-FIRST.txt` 和 `LocalCode/app/current.txt` | 完整解压，再运行 `Start.cmd`；Actions 产物需额外解压外层 ZIP |
 
 如果该次工作流没有成功且未过期的产物，就没有对应的便携下载。修改源码 ZIP 的名字或只复制启动器，不能让源码变成可运行程序。
 
@@ -61,7 +61,7 @@
 
 ### 便携桌面版：解压即开
 
-在 [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.4) 下载 **`LocalCode-0.2.4-windows-x64.zip`** 与 **`SHA256SUMS.txt`**，公开发行附件无需登录 GitHub。用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 的校验值，完整解压应用目录后双击 `Start.cmd`。自动生成的 Source code ZIP 是源码，需要构建；Actions 仍是临时验证产物，下载需登录，且需再解压内层应用 ZIP。
+在 [GitHub Release](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.12) 下载 **`LocalCode-0.2.12-windows-x64.zip`** 与 **`SHA256SUMS.txt`**，公开发行附件无需登录 GitHub。用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 的校验值，完整解压应用目录后双击 `Start.cmd`。自动生成的 Source code ZIP 是源码，需要构建；Actions 仍是临时验证产物，下载需登录，且需再解压内层应用 ZIP。
 
 1. 双击解压后的 **`Start.cmd`** 即可打开桌面，不需要编译工具，也不会自动下载模型。
 2. 在设置中选择连接方式：

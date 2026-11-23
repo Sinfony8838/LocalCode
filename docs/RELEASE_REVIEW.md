@@ -8,9 +8,8 @@ Hosted Windows CI runs from `0.2.5` through `0.2.11` failed early in `scripts/re
 
 | Check | Result |
 | --- | --- |
-| TypeScript check, Vitest unit/integration suites, setup smoke tests, portable/launcher/benchmark tests | Verified after fixes (`0.2.12`) |
-| Source & packaged Electron acceptance suites (`artifacts`, `model-setup`, `agent-modes`, `task-projects`, `typography`, `checkpoint`, `isolation`, `language`, `home`, `pet-customization`) | Verified with isolated fixtures |
-| Hosted Windows CI on `0.2.12` | Triggered on push to `main` (check Actions) |
+| Hosted Windows CI on `dbc707a` (typecheck, 368/370 Vitest unit/integration tests, 11/11 pet-skill tests, PS 5.1 & 7 setup checks, L1–L4 benchmark self-tests, `release_scan.py`, `gitleaks`, 10 source + 10 packaged Electron suites, portable bundle) | PASS — [run 45209000398](https://github.com/Sinfony8838/LocalCode/actions/runs/45209000398) |
+| Release archive ([v0.2.12](https://github.com/Sinfony8838/LocalCode/releases/tag/v0.2.12)) | Published from CI artifact `LocalCode-0.2.12-windows-x64.zip` (`16287` files verified; `SHA256SUMS.txt` & `release-manifest.json` attached) |
 | Clean-Windows, fresh default Ollama, and computer-reboot acceptance | UNRUN; hardware/external gates remain external |
 
 ## 0.2.4 backend localization, benchmark and executor regressions
